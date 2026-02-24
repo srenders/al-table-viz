@@ -1,0 +1,112 @@
+{
+  "name": "al-table-viz",
+  "displayName": "AL Table Visualizer",
+  "description": "Visualize Business Central AL table relationships as interactive ER diagrams",
+  "version": "0.1.0",
+  "publisher": "StevenRenders",
+  "author": {
+    "name": "Steven Renders",
+    "url": "https://thinkaboutit.be"
+  },
+  "homepage": "https://thinkaboutit.be",
+  "icon": "images/al-table-viz.png",
+  "changelog": "CHANGELOG.md",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "Business Central",
+    "AL",
+    "ER diagram",
+    "table relations",
+    "Dynamics 365"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/al-table-viz"
+  },
+  "license": "MIT",
+  "activationEvents": [
+    "onLanguage:al"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "alTableViz.showAll",
+        "title": "AL Table Viz: Show All Table Relations"
+      },
+      {
+        "command": "alTableViz.showCurrentTable",
+        "title": "AL Table Viz: Show Relations for Current Table"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "when": "resourceExtname == .al",
+          "command": "alTableViz.showCurrentTable",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "when": "resourceExtname == .al",
+          "command": "alTableViz.showCurrentTable",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "AL Table Visualizer",
+      "properties": {
+        "alTableViz.defaultDepth": {
+          "type": "number",
+          "default": 2,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Default number of relation hops to show when focusing on a table."
+        },
+        "alTableViz.showExternalTables": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include tables from compiled .app symbol packages (e.g., BC base app tables)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "lint": "eslint src",
+    "pretest": "tsc -p tsconfig.test.json --noEmit false",
+    "test": "node --test out/test/parser.test.js out/test/tableGraph.test.js"
+  },
+  "devDependencies": {
+    "@types/cytoscape": "^3.21.9",
+    "@types/node": "20.x",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^8.3.0",
+    "@typescript-eslint/parser": "^8.3.0",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.4.1",
+    "@vscode/vsce": "^3.7.1",
+    "eslint": "^9.9.1",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.5.4",
+    "webpack": "^5.94.0",
+    "webpack-cli": "^5.1.4"
+  },
+  "dependencies": {
+    "cytoscape": "^3.33.1",
+    "cytoscape-dagre": "^2.5.0",
+    "cytoscape-svg": "^0.4.0",
+    "jszip": "^3.10.1"
+  }
+}
