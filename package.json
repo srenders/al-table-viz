@@ -2,7 +2,7 @@
   "name": "al-table-viz",
   "displayName": "AL Table Visualizer",
   "description": "Visualize Business Central AL table relationships as interactive ER diagrams",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "StevenRenders",
   "author": {
     "name": "Steven Renders",

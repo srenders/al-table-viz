@@ -2,6 +2,14 @@
 
 A Visual Studio Code extension that parses Business Central AL source files and compiled `.app` symbol packages to render an interactive **ER-style diagram** of table relationships.
 
+## Screenshots
+
+![Diagram overview](images/diagram-overview.png)
+*Interactive ER diagram showing all table relationships in the workspace*
+
+![Base app table support](images/table-from-base-app.png)
+*Browse and visualize relationships including standard Business Central base app tables*
+
 ## Features
 
 - **ER diagram** — entity boxes with field names and data types, crow's foot notation on relation edges
