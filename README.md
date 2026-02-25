@@ -7,6 +7,12 @@ A Visual Studio Code extension that parses Business Central AL source files and 
 ![Diagram overview](https://raw.githubusercontent.com/srenders/al-table-viz/main/images/diagram-overview.png)
 *Interactive ER diagram showing all table relationships in the workspace*
 
+![Show relations for current table](https://raw.githubusercontent.com/srenders/al-table-viz/main/images/show-relations.png)
+*Focus the diagram on the table in the active editor*
+
+![Related Tables panel](https://raw.githubusercontent.com/srenders/al-table-viz/main/images/related-tables.png)
+*Sortable Related Tables list panel with By Table / By Relation toggle and hop distance*
+
 ![Base app table support](https://raw.githubusercontent.com/srenders/al-table-viz/main/images/table-from-base-app.png)
 *Browse and visualize relationships including standard Business Central base app tables*
 
