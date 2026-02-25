@@ -2,6 +2,25 @@
 
 All notable changes to AL Table Visualizer will be documented here.
 
+## [0.1.3] — 2026-02-25
+
+### Added
+- **Related Tables list panel** — click the `🔗 Related` toolbar button or run _Find Related Tables_ to open a sortable panel showing all tables reachable from the focused table
+- **By Table / By Relation toggle** — deduplicate the list by unique related table (showing min-hop and relation count) or expand to individual field-level relation rows
+- **Single-click node sync** — clicking a node in the diagram updates the relation list panel if it is open
+- **List → diagram navigation** — clicking a table name in the list refocuses the diagram on that table
+- **External table source** — clicking a table from an `.app` package extracts and opens its `.Table.al` source directly from the ZIP
+
+### Fixed
+- Right-click context menu now works correctly in the VS Code webview sandbox (replaced `cxttap` + `originalEvent` access with a native `contextmenu` listener and Cytoscape hit-testing)
+- Context menu "Open file" now also available for external (app package) tables
+- Focusing a table from the relation list preserves the current diagram direction instead of resetting to `Out`
+
+## [0.1.2] — 2026-02-24
+
+### Fixed
+- Marketplace screenshots now load correctly (absolute GitHub raw URLs)
+
 ## [0.1.0] — 2026-02-24
 
 ### Added

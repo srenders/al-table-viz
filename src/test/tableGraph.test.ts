@@ -253,3 +253,94 @@ describe('TableGraph.getSubgraphForNamespace', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// getRelatedEntries
+// ---------------------------------------------------------------------------
+describe('TableGraph.getRelatedEntries', () => {
+  // buildGraph:
+  //   SalesHeader --CustomerNo--> Customer
+  //   SalesLine   --DocumentNo--> SalesHeader
+  //   SalesLine   --No----------> Item (external)
+
+  it('returns direct relations with hopDistance=1', () => {
+    const g = buildGraph();
+    const entries = g.getRelatedEntries('SalesHeader', 1, 'both');
+    assert.ok(entries.length > 0, 'should have at least one entry');
+    assert.ok(entries.every(e => e.hopDistance === 1), 'all entries at depth 1 should have hopDistance=1');
+    const tables = new Set([...entries.map(e => e.sourceTable), ...entries.map(e => e.targetTable)]);
+    assert.ok(tables.has('Customer'),  'Customer is reachable (out, hop 1)');
+    assert.ok(tables.has('SalesLine'), 'SalesLine is reachable (in, hop 1)');
+  });
+
+  it('returns transitive relations at hopDistance=2', () => {
+    const g = buildGraph();
+    const entries = g.getRelatedEntries('SalesHeader', 2, 'both');
+    const hop2 = entries.filter(e => e.hopDistance === 2);
+    const tablesAtHop2 = new Set([...hop2.map(e => e.sourceTable), ...hop2.map(e => e.targetTable)]);
+    assert.ok(tablesAtHop2.has('Item'), 'Item is 2 hops from SalesHeader (via SalesLine)');
+  });
+
+  it('excludes relations where both ends are the root (hopDistance=0)', () => {
+    const g = new TableGraph(
+      [makeTable('A'), makeTable('B')],
+      [makeRel('A', 'Self', 'A'), makeRel('A', 'Ref', 'B')]
+    );
+    const entries = g.getRelatedEntries('A', 1, 'both');
+    assert.ok(entries.every(e => e.hopDistance > 0), 'self-relation (hopDistance=0) must be excluded');
+    const tables = new Set([...entries.map(e => e.sourceTable), ...entries.map(e => e.targetTable)]);
+    assert.ok(tables.has('B'), 'relation to B should be included');
+  });
+
+  it('respects direction=out', () => {
+    const g = buildGraph();
+    const entries = g.getRelatedEntries('SalesHeader', 1, 'out');
+    const tables = new Set([...entries.map(e => e.sourceTable), ...entries.map(e => e.targetTable)]);
+    assert.ok(tables.has('Customer'),   'Customer is reachable via out edge');
+    assert.ok(!tables.has('SalesLine'), 'SalesLine points TO SalesHeader, not reachable with out');
+  });
+
+  it('respects direction=in', () => {
+    const g = buildGraph();
+    const entries = g.getRelatedEntries('SalesHeader', 1, 'in');
+    const tables = new Set([...entries.map(e => e.sourceTable), ...entries.map(e => e.targetTable)]);
+    assert.ok(tables.has('SalesLine'),   'SalesLine points to SalesHeader, reachable via in');
+    assert.ok(!tables.has('Customer'),   'Customer is an out neighbor, not reachable with in');
+  });
+
+  it('marks external table relations as isExternal=true', () => {
+    const g = buildGraph(); // Item is external
+    const entries = g.getRelatedEntries('SalesLine', 1, 'out');
+    const itemRel = entries.find(e => e.targetTable === 'Item' || e.sourceTable === 'Item');
+    assert.ok(itemRel, 'should have a relation involving Item');
+    assert.equal(itemRel!.isExternal, true);
+  });
+
+  it('returns empty array for unknown root table', () => {
+    const g = buildGraph();
+    const entries = g.getRelatedEntries('DoesNotExist', 2, 'both');
+    assert.equal(entries.length, 0);
+  });
+
+  it('is sorted by hopDistance, then sourceTable, then sourceField', () => {
+    const g = buildGraph();
+    const entries = g.getRelatedEntries('SalesHeader', 2, 'both');
+    for (let i = 1; i < entries.length; i++) {
+      const prev = entries[i - 1];
+      const curr = entries[i];
+      assert.ok(prev.hopDistance <= curr.hopDistance, 'must be sorted by hopDistance');
+      if (prev.hopDistance === curr.hopDistance) {
+        assert.ok(
+          prev.sourceTable.localeCompare(curr.sourceTable) <= 0,
+          `sourceTable order wrong: ${prev.sourceTable} vs ${curr.sourceTable}`
+        );
+        if (prev.sourceTable === curr.sourceTable) {
+          assert.ok(
+            prev.sourceField.localeCompare(curr.sourceField) <= 0,
+            `sourceField order wrong: ${prev.sourceField} vs ${curr.sourceField}`
+          );
+        }
+      }
+    }
+  });
+});

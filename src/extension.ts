@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { WorkspaceScanner } from './scanner/workspaceScanner';
 import { DiagramPanel } from './panel/diagramPanel';
+import { RelationListPanel } from './panel/relationListPanel';
 import { TableGraph } from './model/tableGraph';
 
 let scanner: WorkspaceScanner | undefined;
@@ -25,6 +26,26 @@ export function activate(context: vscode.ExtensionContext): void {
       // Determine which table to focus on
       const focusTable = resolveCurrentTable(graph, uri);
       DiagramPanel.create(context.extensionUri, graph, focusTable ?? undefined);
+    })
+  );
+
+  // Find Related Tables — QuickPick → open diagram focused on table + open relation list panel
+  context.subscriptions.push(
+    vscode.commands.registerCommand('alTableViz.findRelated', async () => {
+      const graph = await ensureGraph(scanner!);
+      if (!graph) { return; }
+      const tableNames = graph.getTables()
+        .map(t => t.name)
+        .sort((a, b) => a.localeCompare(b));
+      const picked = await vscode.window.showQuickPick(tableNames, {
+        placeHolder: 'Select a table to find all related tables…',
+        title: 'AL Table Viz: Find Related Tables'
+      });
+      if (!picked) { return; }
+      const config = vscode.workspace.getConfiguration('alTableViz');
+      const depth: number = config.get('defaultDepth', 2);
+      DiagramPanel.create(context.extensionUri, graph, picked);
+      RelationListPanel.show(context.extensionUri, graph, picked, depth);
     })
   );
 

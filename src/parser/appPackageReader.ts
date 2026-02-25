@@ -13,7 +13,8 @@ export interface AppPackageResult {
  * table + field metadata for use as "external" tables in the diagram.
  */
 export async function readAppPackage(
-  content: Uint8Array
+  content: Uint8Array,
+  appFilePath = ''
 ): Promise<AppPackageResult> {
   const log: string[] = [];
 
@@ -86,7 +87,8 @@ export async function readAppPackage(
     fields: def.fields,
     pkFields: def.pkFields,
     isExternal: true,
-    namespace: def.namespace || undefined
+    namespace: def.namespace || undefined,
+    appFilePath: appFilePath || undefined
   }));
 
   // Build relations from TableRelation properties on fields

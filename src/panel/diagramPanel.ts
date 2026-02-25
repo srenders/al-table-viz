@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { TableGraph } from '../model/tableGraph';
 import { ALTable, ALRelation, GraphPayload, ExtensionMessage, WebviewMessage } from '../model/types';
+import { RelationListPanel } from './relationListPanel';
+import { openExternalTableFromZip } from './openExternal';
 
 /**
  * Strip fields from external tables to keep the postMessage payload small.
@@ -143,6 +145,19 @@ export class DiagramPanel {
       this._disposables
     );
 
+    // When user clicks a table name in the Relation List panel, focus the diagram.
+    RelationListPanel.onFocusTableRequest = (tableName: string) => {
+      this._focusTable = tableName;
+      // Do NOT reset direction — keep whatever 'out'/'in'/'both' the user had set,
+      // so tables that only have incoming relations still appear.
+      this._sendGraph();
+      this._panel.reveal(undefined, true); // bring diagram column into view without stealing focus
+      // Also update the list panel for the newly focused table
+      if (this._graph && RelationListPanel.instance) {
+        RelationListPanel.instance.update(this._graph, tableName, this._depth);
+      }
+    };
+
     this._panel.webview.html = this._getHtml();
   }
 
@@ -237,12 +252,19 @@ export class DiagramPanel {
 
       case 'openFile':
         if (msg.filePath) {
+          // Local .al source file — open directly at the declaration line
           const uri = vscode.Uri.file(msg.filePath);
           const pos = new vscode.Position(Math.max(0, msg.line - 1), 0);
           vscode.window.showTextDocument(uri, {
             selection: new vscode.Range(pos, pos),
             viewColumn: vscode.ViewColumn.One
           });
+        } else if (msg.tableName && this._graph) {
+          // External table — extract its .Table.al from the .app ZIP
+          const table = this._graph.getTables().find(
+            t => t.name.toLowerCase() === msg.tableName!.toLowerCase()
+          );
+          void openExternalTableFromZip(table, msg.tableName!);
         }
         break;
 
@@ -250,6 +272,10 @@ export class DiagramPanel {
         this._focusTable = msg.tableName;
         this._direction = 'out'; // reset direction for each new focus
         this._sendGraph();
+        // Sync relation list panel if it is already open
+        if (this._graph && RelationListPanel.instance) {
+          RelationListPanel.instance.update(this._graph, msg.tableName, this._depth);
+        }
         break;
 
       case 'setDirection':
@@ -260,6 +286,10 @@ export class DiagramPanel {
       case 'setDepth':
         this._depth = msg.depth;
         this._sendGraph();
+        // Sync relation list panel when depth changes and a table is focused
+        if (this._graph && this._focusTable && RelationListPanel.instance) {
+          RelationListPanel.instance.update(this._graph, this._focusTable, this._depth);
+        }
         break;
 
       case 'filterTables':
@@ -288,6 +318,39 @@ export class DiagramPanel {
         this._namespace = msg.namespace || null;
         this._focusTable = null;
         this._sendGraph();
+        break;
+
+      case 'findRelated':
+        // Open / refresh the relation list panel for the given table
+        if (this._graph) {
+          RelationListPanel.show(this._extensionUri, this._graph, msg.tableName, this._depth);
+        }
+        break;
+
+      case 'syncRelated':
+        // Single-click on a node: update the list panel only if it is already open
+        if (this._graph && RelationListPanel.instance) {
+          RelationListPanel.instance.update(this._graph, msg.tableName, this._depth);
+        }
+        break;
+
+      case 'pickTable':
+        // Show QuickPick, then focus diagram + open relation list panel
+        void (async () => {
+          if (!this._graph) { return; }
+          const names = this._graph.getTables()
+            .map(t => t.name)
+            .sort((a, b) => a.localeCompare(b));
+          const picked = await vscode.window.showQuickPick(names, {
+            placeHolder: 'Select a table to find all related tables…',
+            title: 'AL Table Viz: Find Related Tables'
+          });
+          if (!picked) { return; }
+          this._focusTable = picked;
+          this._direction = 'out';
+          this._sendGraph();
+          RelationListPanel.show(this._extensionUri, this._graph!, picked, this._depth);
+        })();
         break;
     }
   }
@@ -411,6 +474,7 @@ export class DiagramPanel {
     <button class="tb-btn" id="btnExportPng" title="Export diagram as PNG">&#x1F4F7; PNG</button>
     <button class="tb-btn" id="btnExportSvg" title="Export diagram as SVG">&#x1F5BC; SVG</button>
     <button class="tb-btn" id="btnExportMermaid" title="Export diagram as Mermaid erDiagram">&#x1F9DC; Mermaid</button>
+    <button class="tb-btn" id="btnFindRelated" title="Open relation list for the focused table, or pick a table">&#x1F517; Related</button>
     <span id="status"></span>
   </div>
   <!-- Context menu -->

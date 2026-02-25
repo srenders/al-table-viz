@@ -96,7 +96,7 @@ export class WorkspaceScanner {
       for (const uri of appFiles) {
         try {
           const bytes  = await fs.readFile(uri.fsPath);
-          const result = await readAppPackage(new Uint8Array(bytes));
+          const result = await readAppPackage(new Uint8Array(bytes), uri.fsPath);
           const shortName = uri.fsPath.split(/[\\/]/).slice(-2).join('/');
           for (const line of result.log) {
             out.appendLine(`  [${shortName}] ${line}`);

@@ -15,8 +15,10 @@ A Visual Studio Code extension that parses Business Central AL source files and 
 - **ER diagram** — entity boxes with field names and data types, crow's foot notation on relation edges
 - **Depth/focus mode** — double-click any table to expand its neighbourhood; use the depth slider to control how many hops to show
 - **Filter by name** — type in the search box to immediately narrow the diagram to matching tables
-- **Open source** — click a table node to jump to its `.al` declaration
+- **Open source** — right-click a table node and choose _Open file_ to jump to its `.al` declaration; works for both local source files and tables from `.app` packages
 - **Base-app coverage** — reads compiled `.app` symbol packages so relations to standard BC tables resolve correctly
+- **Related Tables list panel** — click `🔗 Related` to open a sortable panel of all reachable tables; toggle between _By Table_ (deduplicated, with hop distance and relation count) and _By Relation_ (field-level detail); click any table name to refocus the diagram and open its source
+- **Single-click sync** — clicking a node in the diagram updates the relation list panel if it is open
 - **Live refresh** — diagram updates automatically when `.al` files change
 
 ## Commands
@@ -25,6 +27,7 @@ A Visual Studio Code extension that parses Business Central AL source files and 
 |---|---|
 | `AL Table Viz: Show All Table Relations` | Opens the diagram with all tables in the workspace |
 | `AL Table Viz: Show Relations for Current Table` | Opens the diagram focused on the table in the active editor (also available via right-click on `.al` files) |
+| `AL Table Viz: Find Related Tables` | Pick a table by name and open its relation list panel alongside the diagram |
 
 ## Configuration
 

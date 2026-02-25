@@ -1,4 +1,4 @@
-import { ALField, ALRelation, ALTable } from './types';
+import { ALField, ALRelation, ALTable, RelatedEntry } from './types';
 
 export interface SubGraph {
   tables: ALTable[];
@@ -206,6 +206,64 @@ export class TableGraph {
       }
     }
     return names.sort((a, b) => a.localeCompare(b));
+  }
+
+  /**
+   * Returns a flat, sorted list of all relations reachable from `rootTableName`
+   * within `depth` BFS hops. Each entry includes the hop distance (1 = direct,
+   * 2+ = transitive) and whether either end of the relation is an external table.
+   * Used to populate the RelationListPanel.
+   */
+  getRelatedEntries(rootTableName: string, depth: number, direction: 'out' | 'in' | 'both' = 'both'): RelatedEntry[] {
+    // BFS — track minimum hop distance per table name
+    const hopMap = new Map<string, number>();
+    const queue: Array<{ name: string; hop: number }> = [
+      { name: rootTableName.toLowerCase(), hop: 0 }
+    ];
+
+    while (queue.length > 0) {
+      const { name, hop } = queue.shift()!;
+      if (hopMap.has(name)) { continue; }
+      hopMap.set(name, hop);
+      if (hop >= depth) { continue; }
+      for (const rel of this.relations) {
+        const src = rel.sourceTable.toLowerCase();
+        const tgt = rel.targetTable.toLowerCase();
+        if (src === name && direction !== 'in'  && !hopMap.has(tgt)) { queue.push({ name: tgt, hop: hop + 1 }); }
+        if (tgt === name && direction !== 'out' && !hopMap.has(src)) { queue.push({ name: src, hop: hop + 1 }); }
+      }
+    }
+
+    const entries: RelatedEntry[] = [];
+
+    for (const rel of this.relations) {
+      const srcLower = rel.sourceTable.toLowerCase();
+      const tgtLower = rel.targetTable.toLowerCase();
+      if (!hopMap.has(srcLower) || !hopMap.has(tgtLower)) { continue; }
+      // Hop distance = the max of the two ends (the "farther" end from root)
+      const hopDistance = Math.max(hopMap.get(srcLower)!, hopMap.get(tgtLower)!);
+      if (hopDistance === 0) { continue; } // skip relations where both ends are the root itself
+      const srcTable = this.tableMap.get(srcLower);
+      const tgtTable = this.tableMap.get(tgtLower);
+      entries.push({
+        sourceTable: rel.sourceTable,
+        sourceField: rel.sourceField,
+        targetTable: rel.targetTable,
+        targetField: rel.targetField,
+        isExternal: !!(srcTable?.isExternal || tgtTable?.isExternal),
+        hopDistance
+      });
+    }
+
+    // Sort by hop distance, then source table, then source field
+    entries.sort((a, b) => {
+      if (a.hopDistance !== b.hopDistance) { return a.hopDistance - b.hopDistance; }
+      const st = a.sourceTable.localeCompare(b.sourceTable);
+      if (st !== 0) { return st; }
+      return a.sourceField.localeCompare(b.sourceField);
+    });
+
+    return entries;
   }
 
   /**

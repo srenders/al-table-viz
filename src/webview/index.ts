@@ -56,6 +56,7 @@ const btnDismissError   = document.getElementById('btnDismissError')!;
 const btnExportPng      = document.getElementById('btnExportPng')!;
 const btnExportSvg      = document.getElementById('btnExportSvg')!;
 const btnExportMermaid  = document.getElementById('btnExportMermaid')!;
+const btnFindRelated    = document.getElementById('btnFindRelated')!;
 // ---------------------------------------------------------------------------
 // Sidebar + context menu state
 // ---------------------------------------------------------------------------
@@ -80,29 +81,46 @@ function initCy(): Core {
     wheelSensitivity: 0.3
   });
 
+  // Right-click on a node → context menu.
+  // Use native contextmenu event (+ stopPropagation) instead of Cytoscape's
+  // cxttap, which was unreliable in VS Code's webview sandbox.
+  cyEl.addEventListener('contextmenu', (e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!cy) { return; }
+    const rect = cyEl.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    // Hit-test: find the first node whose rendered bounding box contains the click
+    const hit = cy.nodes().filter(n => {
+      const bb = n.renderedBoundingBox({ includeLabels: false, includeOverlays: false });
+      return px >= bb.x1 && px <= bb.x2 && py >= bb.y1 && py <= bb.y2;
+    }).first();
+    if (!hit || hit.length === 0) { return; }
+    ctxNodeName            = (hit.data('tableName')      as string)         ?? '';
+    ctxNodeFilePath        = (hit.data('filePath')       as string)         ?? '';
+    ctxNodeDeclarationLine = (hit.data('declarationLine') as number | undefined) ?? 1;
+    showCtxMenu(e.clientX, e.clientY, !!ctxNodeName);
+  });
+
   // Double-click → focus subgraph on that table
   cy.on('dblclick', 'node', evt => {
     const tableName = evt.target.data('tableName') as string;
     if (tableName) { postMsg({ type: 'focusTable', tableName }); }
   });
 
-  // Right-click → context menu
-  cy.on('cxttap', 'node', evt => {
-    const tableName = evt.target.data('tableName') as string;
-    const filePath  = evt.target.data('filePath')  as string | undefined;
-    ctxNodeName            = tableName ?? '';
-    ctxNodeFilePath        = filePath  ?? '';
-    ctxNodeDeclarationLine = (evt.target.data('declarationLine') as number | undefined) ?? 1;
-    const me = (evt.originalEvent as MouseEvent);
-    showCtxMenu(me.clientX, me.clientY, !!filePath);
-  });
+  // Right-click → context menu (handled via native contextmenu on cyEl above)
+  // Keeping cxttap as no-op to prevent default browser menu on some platforms
+  cy.on('cxttap', 'node', _evt => { /* handled by native contextmenu listener */ });
 
-  // Tap on node → highlight it and direct neighbours/edges
+  // Tap on node → highlight it, sync relation list if open
   cy.on('tap', 'node', evt => {
     cy!.elements().removeClass('highlighted').addClass('dimmed');
     evt.target.removeClass('dimmed').addClass('highlighted');
     evt.target.connectedEdges().removeClass('dimmed').addClass('highlighted');
     evt.target.neighborhood('node').removeClass('dimmed').addClass('highlighted');
+    const tableName = evt.target.data('tableName') as string;
+    if (tableName) { postMsg({ type: 'syncRelated', tableName }); }
   });
 
   // Tap on canvas background → dismiss context menu and clear highlight
@@ -556,10 +574,10 @@ ctxFocusEl.addEventListener('click', () => {
 });
 ctxOpenEl.addEventListener('click', () => {
   hideCtxMenu();
-  if (ctxNodeFilePath) { postMsg({ type: 'openFile', filePath: ctxNodeFilePath, line: ctxNodeDeclarationLine }); }
+  if (ctxNodeFilePath) { postMsg({ type: 'openFile', filePath: ctxNodeFilePath, line: ctxNodeDeclarationLine, tableName: ctxNodeName }); }
+  else if (ctxNodeName)  { postMsg({ type: 'openFile', filePath: '', line: 0, tableName: ctxNodeName }); }
 });
 document.addEventListener('click', () => { hideCtxMenu(); });
-document.addEventListener('contextmenu', e => { if (e.target !== ctxMenuEl && !ctxMenuEl.contains(e.target as Node)) { hideCtxMenu(); } });
 
 // Direction toggle: Out → In → Both → Out
 const dirCycle: Array<'out' | 'in' | 'both'> = ['out', 'in', 'both'];
@@ -586,6 +604,15 @@ btnExportPng.addEventListener('click', () => {
 
 btnDismissError.addEventListener('click', () => {
   errorBannerEl.classList.add('hidden');
+});
+
+// Open relation list for the focused table, or trigger a QuickPick to pick one
+btnFindRelated.addEventListener('click', () => {
+  if (currentFocusName) {
+    postMsg({ type: 'findRelated', tableName: currentFocusName });
+  } else {
+    postMsg({ type: 'pickTable' });
+  }
 });
 
 btnExportSvg.addEventListener('click', () => {

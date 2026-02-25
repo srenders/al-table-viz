@@ -41,6 +41,8 @@ export interface ALTable {
   pkFields?: string[];
   /** True for tables from .app symbol packages (no source file) */
   isExternal: boolean;
+  /** Absolute path to the .app package file this table was loaded from (external tables only) */
+  appFilePath?: string;
   /** Namespace from SymbolReference (e.g. 'Microsoft.Finance.GeneralLedger') — external tables only */
   namespace?: string;
 }
@@ -68,18 +70,37 @@ export interface GraphPayload {
   sidebarItems: string[];
 }
 
+/**
+ * A single relation entry for the relation list panel.
+ * Produced by TableGraph.getRelatedEntries().
+ */
+export interface RelatedEntry {
+  sourceTable: string;
+  sourceField: string;
+  targetTable: string;
+  targetField: string;
+  /** True when either the source or target table is external (from a .app package) */
+  isExternal: boolean;
+  /** BFS hop distance from the root table: 1 = direct relation, 2+ = transitive */
+  hopDistance: number;
+}
+
 // Messages sent from the extension to the webview
 export type ExtensionMessage =
   | { type: 'setGraph'; payload: GraphPayload }
   | { type: 'setLoading'; loading: boolean }
-  | { type: 'setError'; message: string };
+  | { type: 'setError'; message: string }
+  | { type: 'setRelationList'; tableName: string; depth: number; entries: RelatedEntry[]; tableFiles: Record<string, { filePath: string; line: number }> };
 
 // Messages sent from the webview to the extension
 export type WebviewMessage =
-  | { type: 'openFile'; filePath: string; line: number }
+  | { type: 'openFile'; filePath: string; line: number; tableName?: string }
   | { type: 'focusTable'; tableName: string }
   | { type: 'setDepth'; depth: number }
   | { type: 'setDirection'; direction: 'out' | 'in' | 'both' }
   | { type: 'filterTables'; query: string }
   | { type: 'filterByNamespace'; namespace: string }
+  | { type: 'findRelated'; tableName: string }
+  | { type: 'syncRelated'; tableName: string }
+  | { type: 'pickTable' }
   | { type: 'ready' };
