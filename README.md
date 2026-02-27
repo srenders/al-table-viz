@@ -26,6 +26,7 @@ A Visual Studio Code extension that parses Business Central AL source files and 
 - **Related Tables list panel** — click `🔗 Related` to open a sortable panel of all reachable tables; toggle between _By Table_ (deduplicated, with hop distance and relation count) and _By Relation_ (field-level detail); click any table name to refocus the diagram and open its source
 - **Single-click sync** — clicking a node in the diagram updates the relation list panel if it is open
 - **Live refresh** — diagram updates automatically when `.al` files change
+- **Colour themes** — switch between four built-in palettes (Dark, Light, High Contrast, Solarized) using the picker in the diagram toolbar; the choice is saved to settings and applied live without reloading the panel
 
 ## Commands
 
@@ -41,6 +42,7 @@ A Visual Studio Code extension that parses Business Central AL source files and 
 |---|---|---|
 | `alTableViz.defaultDepth` | `2` | Number of relation hops to show in focus mode |
 | `alTableViz.showExternalTables` | `true` | Include tables from `.app` symbol packages |
+| `alTableViz.colorTheme` | `"dark"` | Colour theme: `dark`, `light`, `highContrast`, or `solarized` |
 
 ## Requirements
 

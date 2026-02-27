@@ -2,7 +2,11 @@
 
 All notable changes to AL Table Visualizer will be documented here.
 
-## [0.1.3] — 2026-02-25
+## [0.1.4] — 2026-02-27
+
+### Added
+- **Colour themes** — four built-in palettes selectable from a dropdown in the diagram toolbar: _Dark_ (default), _Light_, _High Contrast_, and _Solarized Dark_
+- **Live theme switching** — selecting a theme in the toolbar applies it instantly and persists the choice to `alTableViz.colorTheme`; changing the setting externally also re-renders live
 
 ### Added
 - **Related Tables list panel** — click the `🔗 Related` toolbar button or run _Find Related Tables_ to open a sortable panel showing all tables reachable from the focused table

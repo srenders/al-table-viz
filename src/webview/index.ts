@@ -14,8 +14,10 @@ import type {
   ExtensionMessage,
   GraphPayload,
   WebviewMessage,
-  ALTable
+  ALTable,
+  DiagramColors
 } from '../model/types';
+import { THEMES, DEFAULT_THEME } from '../model/themes';
 
 cytoscape.use(dagre);
 cytoscape.use(cytoscapeSvg);
@@ -57,6 +59,7 @@ const btnExportPng      = document.getElementById('btnExportPng')!;
 const btnExportSvg      = document.getElementById('btnExportSvg')!;
 const btnExportMermaid  = document.getElementById('btnExportMermaid')!;
 const btnFindRelated    = document.getElementById('btnFindRelated')!;
+const themePicker       = document.getElementById('themePicker') as HTMLSelectElement;;
 // ---------------------------------------------------------------------------
 // Sidebar + context menu state
 // ---------------------------------------------------------------------------
@@ -66,6 +69,11 @@ let ctxNodeName            = '';
 let ctxNodeFilePath        = '';
 let ctxNodeDeclarationLine = 1;
 let lastPayload: GraphPayload | null = null;
+
+// ---------------------------------------------------------------------------
+// Active colour palette — updated from each GraphPayload
+// ---------------------------------------------------------------------------
+let activeColors: DiagramColors = { ...THEMES[DEFAULT_THEME] };
 
 // ---------------------------------------------------------------------------
 // Cytoscape instance
@@ -167,13 +175,13 @@ function xmlEsc(s: string): string {
 function buildNodeSvg(t: ALTable, isExternal: boolean): string {
   const W        = NODE_WIDTH;
   const H        = nodeHeight(t);
-  const nameFg   = isExternal ? '#8b9dc3' : '#79c0ff';
-  const pkFg     = isExternal ? '#b0c4de' : '#e0e8ff';
-  const fieldFg  = isExternal ? '#7a8394' : '#c9d1d9';
-  const moresFg  = '#555e6e';
-  const headerBg = isExternal ? '#151c27' : '#1a2236';
-  const bodyBg   = isExternal ? '#121820' : '#1c2333';
-  const sepColor = isExternal ? '#2a3550' : '#3a6ea8';
+  const nameFg   = isExternal ? activeColors.extNodeNameFg   : activeColors.nodeNameFg;
+  const pkFg     = isExternal ? activeColors.extNodePkFg     : activeColors.nodePkFg;
+  const fieldFg  = isExternal ? activeColors.extNodeFieldFg  : activeColors.nodeFieldFg;
+  const moresFg  = activeColors.moresFg;
+  const headerBg = isExternal ? activeColors.extNodeHeaderBg : activeColors.nodeHeaderBg;
+  const bodyBg   = isExternal ? activeColors.extNodeBodyBg   : activeColors.nodeBodyBg;
+  const sepColor = isExternal ? activeColors.extNodeSepColor : activeColors.nodeSepColor;
 
   const pkSet = new Set((t.pkFields ?? []).map(n => n.toLowerCase()));
   const hasPk = pkSet.size > 0;
@@ -182,11 +190,11 @@ function buildNodeSvg(t: ALTable, isExternal: boolean): string {
   if (!hasPk) {
     // No PK info: show all fields (or empty note)
     if (t.fields.length === 0) {
-      rows = `<text x="${PAD_X}" y="${HEADER_H + FIELD_PAD_T + LINE_H - 3}" font-size="10" fill="#555" font-style="italic" font-family="Consolas,'Courier New',monospace">(no fields)</text>`;
+      rows = `<text x="${PAD_X}" y="${HEADER_H + FIELD_PAD_T + LINE_H - 3}" font-size="10" fill="${xmlEsc(moresFg)}" font-style="italic" font-family="Consolas,'Courier New',monospace">(no fields)</text>`;
     } else {
       rows = t.fields.map((f, i) => {
         const y = HEADER_H + FIELD_PAD_T + i * LINE_H + LINE_H - 3;
-        const eFg    = f.isFromExtension ? (isExternal ? '#9a7a3a' : '#c9a04a') : fieldFg;
+        const eFg    = f.isFromExtension ? (isExternal ? activeColors.extNodeExtFieldFg : activeColors.nodeExtFieldFg) : fieldFg;
         const prefix = f.isFromExtension ? '\u2295 ' : ''; // ⊕ prefix for extension fields
         return `<text x="${PAD_X}" y="${y}" font-size="10" fill="${xmlEsc(eFg)}" font-family="Consolas,'Courier New',monospace">${xmlEsc(prefix + f.name)} : ${xmlEsc(f.dataType)}</text>`;
       }).join('');
@@ -424,34 +432,34 @@ function buildStylesheet(): StylesheetStyle[] {
         'width':                    NODE_WIDTH,
         'height':                  'data(nodeH)',
         'label':                   '',
-        'background-color':        '#1c2333',
+        'background-color':        activeColors.nodeBodyBg,
         'background-image':        'data(svgBg)',
         'background-fit':          'cover',
         'background-clip':         'node',
         'background-opacity':       1,
         'border-width':             1,
-        'border-color':            '#3a6ea8',
+        'border-color':            activeColors.nodeSepColor,
         'padding':                 '0px'
       } as any
     },
     {
       selector: 'node.tbl-src',
       style: {
-        'border-color': '#4a9eff',
+        'border-color': activeColors.nodeBorderColor,
         'border-width':  2
       } as any
     },
     {
       selector: 'node.tbl-ext',
       style: {
-        'border-color': '#3a3a5a',
+        'border-color': activeColors.extNodeBorderColor,
         'border-width':  1
       } as any
     },
     {
       selector: 'node:selected',
       style: {
-        'border-color': '#ffcc00',
+        'border-color': activeColors.selectedColor,
         'border-width':  2
       } as any
     },
@@ -461,19 +469,19 @@ function buildStylesheet(): StylesheetStyle[] {
       style: {
         'width':                    1.5,
         'curve-style':             'unbundled-bezier',
-        'line-color':              '#4a9eff',
+        'line-color':              activeColors.edgeColor,
         'source-arrow-shape':      'vee',
-        'source-arrow-color':      '#4a9eff',
+        'source-arrow-color':      activeColors.edgeColor,
         'target-arrow-shape':      'tee',
-        'target-arrow-color':      '#4a9eff',
+        'target-arrow-color':      activeColors.edgeColor,
         'arrow-scale':              1.4,
         'label':                   'data(label)',
         'font-size':               '9px',
         'font-family':             'Consolas, "Courier New", monospace',
         'font-style':              'italic',
-        'color':                   '#7aaddd',
+        'color':                   activeColors.edgeLabelColor,
         'text-wrap':               'wrap',
-        'text-background-color':   '#0d1117',
+        'text-background-color':   activeColors.edgeLabelBg,
         'text-background-opacity':  0.85,
         'text-background-padding': '2px',
         'text-rotation':           'none',
@@ -484,10 +492,10 @@ function buildStylesheet(): StylesheetStyle[] {
       selector: 'edge.rel-cond',
       style: {
         'line-style':          'dashed',
-        'line-color':          '#d4a017',
-        'source-arrow-color':  '#d4a017',
-        'target-arrow-color':  '#d4a017',
-        'color':               '#d4a017'
+        'line-color':          activeColors.edgeCondColor,
+        'source-arrow-color':  activeColors.edgeCondColor,
+        'target-arrow-color':  activeColors.edgeCondColor,
+        'color':               activeColors.edgeCondColor
       } as any
     },
     {
@@ -497,15 +505,31 @@ function buildStylesheet(): StylesheetStyle[] {
     },
     {
       selector: 'node.highlighted',
-      style: { 'border-color': '#ffcc00', 'border-width': 3, 'opacity': 1 } as any
+      style: { 'border-color': activeColors.highlightColor, 'border-width': 3, 'opacity': 1 } as any
     },
     {
       selector: 'edge.highlighted',
-      style: { 'width': 3, 'line-color': '#ffcc00',
-                'source-arrow-color': '#ffcc00', 'target-arrow-color': '#ffcc00',
+      style: { 'width': 3, 'line-color': activeColors.highlightColor,
+                'source-arrow-color': activeColors.highlightColor, 'target-arrow-color': activeColors.highlightColor,
                 'opacity': 1 } as any
     }
   ];
+}
+
+/**
+ * Re-apply the active colour palette to an already-rendered Cytoscape graph.
+ * Updates the stylesheet and re-bakes all node SVG backgrounds.
+ * Called when the user switches themes in the panel without a full graph reload.
+ */
+function applyColors(): void {
+  if (!cy || !lastPayload) { return; }
+  cy.style(buildStylesheet());
+  cy.nodes().forEach(n => {
+    const tableName  = n.data('tableName')  as string;
+    const isExternal = n.data('isExternal') as boolean;
+    const table = lastPayload!.tables.find(t => t.name === tableName);
+    if (table) { n.data('svgBg', buildNodeSvg(table, isExternal)); }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -595,7 +619,7 @@ btnZoomOut.addEventListener('click', () => { if (cy) { cy.zoom({ level: cy.zoom(
 
 btnExportPng.addEventListener('click', () => {
   if (!cy) { return; }
-  const dataUri = cy.png({ output: 'base64uri', bg: '#1e1e2e', scale: 2 }) as string;
+  const dataUri = cy.png({ output: 'base64uri', bg: activeColors.exportBg, scale: 2 }) as string;
   const a = document.createElement('a');
   a.href = dataUri;
   a.download = 'al-diagram.png';
@@ -618,7 +642,7 @@ btnFindRelated.addEventListener('click', () => {
 btnExportSvg.addEventListener('click', () => {
   if (!cy) { return; }
   // cytoscape-svg augments cy with a .svg() method
-  const svgContent: string = (cy as any).svg({ scale: 1, full: true, bg: '#1e1e2e' });
+  const svgContent: string = (cy as any).svg({ scale: 1, full: true, bg: activeColors.exportBg });
   const blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
@@ -638,6 +662,14 @@ btnExportMermaid.addEventListener('click', () => {
   a.download = 'al-diagram.mmd';
   a.click();
   URL.revokeObjectURL(url);
+});
+
+// Theme picker — instant visual feedback + persist the choice via extension
+themePicker.addEventListener('change', () => {
+  const theme = themePicker.value;
+  if (THEMES[theme]) { activeColors = { ...THEMES[theme] }; }
+  applyColors();
+  postMsg({ type: 'setTheme', theme });
 });
 
 // ---------------------------------------------------------------------------
@@ -717,6 +749,10 @@ window.addEventListener('message', (event: MessageEvent<ExtensionMessage>) => {
   const msg = event.data;
   switch (msg.type) {
     case 'setGraph':
+      // Update the active colour palette BEFORE rendering so buildStylesheet() uses
+      // the new colours when initCy() is called inside renderGraph().
+      activeColors = { ...msg.payload.colors };
+      themePicker.value = msg.payload.colorTheme ?? DEFAULT_THEME;
       depthSlider.value = String(msg.payload.depth);
       depthVal.textContent = String(msg.payload.depth);
       populateNamespaces(msg.payload.namespaces ?? []);

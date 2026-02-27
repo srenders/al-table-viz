@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { TableGraph } from '../model/tableGraph';
-import { ALTable, ALRelation, GraphPayload, ExtensionMessage, WebviewMessage } from '../model/types';
+import { ALTable, ALRelation, GraphPayload, ExtensionMessage, WebviewMessage, DiagramColors } from '../model/types';
+import { THEMES, DEFAULT_THEME } from '../model/themes';
 import { RelationListPanel } from './relationListPanel';
 import { openExternalTableFromZip } from './openExternal';
 
@@ -159,6 +160,13 @@ export class DiagramPanel {
     };
 
     this._panel.webview.html = this._getHtml();
+
+    // Re-render the diagram live when the colour theme setting changes.
+    vscode.workspace.onDidChangeConfiguration(e => {
+      if (e.affectsConfiguration('alTableViz.colorTheme')) {
+        this._sendGraph();
+      }
+    }, null, this._disposables);
   }
 
   update(graph: TableGraph, focusTable: string | null): void {
@@ -167,11 +175,19 @@ export class DiagramPanel {
     this._sendGraph();
   }
 
+  /** Resolve the configured theme name into a DiagramColors palette. */
+  private _resolveColors(): DiagramColors {
+    const theme = vscode.workspace.getConfiguration('alTableViz').get<string>('colorTheme', DEFAULT_THEME);
+    return THEMES[theme] ?? THEMES[DEFAULT_THEME];
+  }
+
   private _sendGraph(): void {
     if (!this._graph) {
       return;
     }
 
+    const colors     = this._resolveColors();
+    const colorTheme = vscode.workspace.getConfiguration('alTableViz').get<string>('colorTheme', DEFAULT_THEME);
     const namespaces  = this._graph.getNamespaces();
     const sidebarItems = this._namespace
       ? this._graph.getTableNamesForNamespace(this._namespace)
@@ -212,7 +228,9 @@ export class DiagramPanel {
         focusTable: this._focusTable,
         depth: this._depth,
         namespaces,
-        sidebarItems
+        sidebarItems,
+        colors,
+        colorTheme
       };
     } else if (this._namespace) {
       // Namespace mode with no focused table: show nothing in diagram until user picks from sidebar
@@ -222,7 +240,9 @@ export class DiagramPanel {
         focusTable: null,
         depth: this._depth,
         namespaces,
-        sidebarItems
+        sidebarItems,
+        colors,
+        colorTheme
       };
     } else {
       // Default view: source tables + their neighbours up to _depth hops.
@@ -233,7 +253,9 @@ export class DiagramPanel {
         focusTable: null,
         depth: this._depth,
         namespaces,
-        sidebarItems: []
+        sidebarItems: [],
+        colors,
+        colorTheme
       };
     }
 
@@ -301,13 +323,17 @@ export class DiagramPanel {
             this._sendGraph();
           } else {
             const filtered = this._graph.filterByName(msg.query);
+            const ftColors = this._resolveColors();
+            const ftTheme  = vscode.workspace.getConfiguration('alTableViz').get<string>('colorTheme', DEFAULT_THEME);
             const payload: GraphPayload = {
               tables: prepareFields(filtered.tables),
               relations: filtered.relations,
               focusTable: null,
               depth: this._depth,
               namespaces,
-              sidebarItems
+              sidebarItems,
+              colors: ftColors,
+              colorTheme: ftTheme
             };
             this._postMessage({ type: 'setGraph', payload });
           }
@@ -332,6 +358,12 @@ export class DiagramPanel {
         if (this._graph && RelationListPanel.instance) {
           RelationListPanel.instance.update(this._graph, msg.tableName, this._depth);
         }
+        break;
+
+      case 'setTheme':
+        // Persist the chosen theme name to user settings; the config-change listener
+        // will call _sendGraph() automatically to push updated colours.
+        void vscode.workspace.getConfiguration('alTableViz').update('colorTheme', msg.theme, vscode.ConfigurationTarget.Global);
         break;
 
       case 'pickTable':
@@ -395,6 +427,10 @@ export class DiagramPanel {
                 border: 1px solid var(--vscode-input-border, #555);
                 padding: 3px 6px; border-radius: 3px; font-size: 12px;
                 max-width: 200px; }
+    #themePicker { background: var(--vscode-input-background);
+                   color: var(--vscode-input-foreground);
+                   border: 1px solid var(--vscode-input-border, #555);
+                   padding: 3px 6px; border-radius: 3px; font-size: 12px; }
     #depthSlider { width: 80px; }
     #depthVal { min-width: 12px; text-align: center; font-size: 12px; }
     .tb-btn { padding: 3px 10px; font-size: 12px; cursor: pointer;
@@ -475,6 +511,12 @@ export class DiagramPanel {
     <button class="tb-btn" id="btnExportSvg" title="Export diagram as SVG">&#x1F5BC; SVG</button>
     <button class="tb-btn" id="btnExportMermaid" title="Export diagram as Mermaid erDiagram">&#x1F9DC; Mermaid</button>
     <button class="tb-btn" id="btnFindRelated" title="Open relation list for the focused table, or pick a table">&#x1F517; Related</button>
+    <select id="themePicker" title="Colour theme">
+      <option value="dark">Dark</option>
+      <option value="light">Light</option>
+      <option value="highContrast">High Contrast</option>
+      <option value="solarized">Solarized</option>
+    </select>
     <span id="status"></span>
   </div>
   <!-- Context menu -->

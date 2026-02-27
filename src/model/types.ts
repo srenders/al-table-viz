@@ -2,6 +2,44 @@
 // Data model shared between extension host and webview (must be JSON-safe)
 // ---------------------------------------------------------------------------
 
+/**
+ * Resolved color palette used by the webview to render the diagram.
+ * All values are CSS colour strings (hex preferred).
+ * The extension resolves the active theme + custom overrides before sending;
+ * the webview never reads raw settings directly.
+ */
+export interface DiagramColors {
+  // Source-table node
+  nodeHeaderBg:     string;
+  nodeBodyBg:       string;
+  nodeBorderColor:  string;
+  nodeNameFg:       string;
+  nodePkFg:         string;
+  nodeFieldFg:      string;
+  nodeExtFieldFg:   string;   // ⊕ extension-merged fields inside a source table
+  nodeSepColor:     string;
+  moresFg:          string;
+  // External-table node
+  extNodeHeaderBg:    string;
+  extNodeBodyBg:      string;
+  extNodeBorderColor: string;
+  extNodeNameFg:      string;
+  extNodePkFg:        string;
+  extNodeFieldFg:     string;
+  extNodeExtFieldFg:  string; // ⊕ extension-merged fields inside an external table
+  extNodeSepColor:    string;
+  // Edges
+  edgeColor:      string;
+  edgeLabelColor: string;
+  edgeLabelBg:    string;
+  edgeCondColor:  string;
+  // Selection / highlight
+  selectedColor:  string;
+  highlightColor: string;
+  // Export background
+  exportBg: string;
+}
+
 /** A field defined in a table or table extension */
 export interface ALField {
   id: number;
@@ -68,6 +106,10 @@ export interface GraphPayload {
   namespaces: string[];
   /** All table names in the active namespace for the sidebar list; empty = no sidebar */
   sidebarItems: string[];
+  /** Resolved colour palette for the webview to use when rendering the diagram */
+  colors: DiagramColors;
+  /** Name of the active colour theme ('dark' | 'light' | 'highContrast' | 'solarized' | 'custom') */
+  colorTheme: string;
 }
 
 /**
@@ -103,4 +145,5 @@ export type WebviewMessage =
   | { type: 'findRelated'; tableName: string }
   | { type: 'syncRelated'; tableName: string }
   | { type: 'pickTable' }
-  | { type: 'ready' };
+  | { type: 'ready' }
+  | { type: 'setTheme'; theme: string };
