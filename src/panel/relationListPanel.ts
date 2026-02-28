@@ -3,8 +3,14 @@ import { TableGraph } from '../model/tableGraph';
 import { RelatedEntry } from '../model/types';
 import { openExternalTableFromZip } from './openExternal';
 
-type RelationListMessage =
-  | { type: 'setRelationList'; tableName: string; depth: number; entries: RelatedEntry[]; tableFiles: Record<string, { filePath: string; line: number }> };
+type RelationListMessage = {
+  type: 'setRelationList';
+  tableName: string;
+  depth: number;
+  entries: RelatedEntry[];
+  tableFiles: Record<string, { filePath: string; line: number }>;
+  direction: 'out' | 'in' | 'both';
+};
 
 type RelationListIncoming =
   | { type: 'focusTable'; tableName: string }
@@ -16,6 +22,7 @@ export class RelationListPanel {
   private static _instance: RelationListPanel | undefined;
 
   private readonly _panel: vscode.WebviewPanel;
+  private readonly _extensionUri: vscode.Uri;
   private _graph: TableGraph | null = null;
   private _disposables: vscode.Disposable[] = [];
 
@@ -23,45 +30,73 @@ export class RelationListPanel {
   // Public API
   // ---------------------------------------------------------------------------
 
-  static show(extensionUri: vscode.Uri, graph: TableGraph, tableName: string, depth: number): RelationListPanel {
+  static show(
+    extensionUri: vscode.Uri,
+    graph: TableGraph,
+    tableName: string,
+    depth: number,
+    direction: 'out' | 'in' | 'both' = 'both'
+  ): RelationListPanel {
     if (RelationListPanel._instance) {
+      // Panel is already open — just reveal and push new data via postMessage
+      // (the webview script is already running so the message is received)
       RelationListPanel._instance._panel.reveal(vscode.ViewColumn.Beside);
+      RelationListPanel._instance.update(graph, tableName, depth, direction);
     } else {
+      // Build the initial payload first so we can embed it in the HTML
+      const msg = RelationListPanel._buildMessage(graph, tableName, depth, direction);
       const panel = vscode.window.createWebviewPanel(
         'alTableVizRelList',
         'AL Table Relations List',
         vscode.ViewColumn.Beside,
-        { enableScripts: true, retainContextWhenHidden: true }
+        {
+          enableScripts: true,
+          retainContextWhenHidden: true,
+          localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'dist')]
+        }
       );
-      RelationListPanel._instance = new RelationListPanel(panel);
+      const inst = new RelationListPanel(panel, extensionUri);
+      RelationListPanel._instance = inst;
+      inst._graph = graph;
+      inst._panel.title = `Relations: ${tableName}`;
+      // Embed initial data in the HTML — script reads it synchronously at load time,
+      // avoiding any postMessage race condition on first open.
+      panel.webview.html = inst._getHtml(msg);
     }
-    RelationListPanel._instance.update(graph, tableName, depth);
-    return RelationListPanel._instance;
+    return RelationListPanel._instance!;
   }
 
   static get instance(): RelationListPanel | undefined {
     return RelationListPanel._instance;
   }
 
-  update(graph: TableGraph, tableName: string, depth: number): void {
+  update(graph: TableGraph, tableName: string, depth: number, direction: 'out' | 'in' | 'both' = 'both'): void {
     this._graph = graph;
     this._panel.title = `Relations: ${tableName}`;
-    const entries = graph.getRelatedEntries(tableName, depth, 'both');
+    const msg = RelationListPanel._buildMessage(graph, tableName, depth, direction);
+    this._postMessage(msg);
+  }
+
+  private static _buildMessage(
+    graph: TableGraph, tableName: string, depth: number, direction: 'out' | 'in' | 'both'
+  ): RelationListMessage {
+    const entries = graph.getRelatedEntries(tableName, depth, direction);
     const tableFiles: Record<string, { filePath: string; line: number }> = {};
     for (const t of graph.getTables()) {
       if (t.filePath) {
         tableFiles[t.name] = { filePath: t.filePath, line: t.declarationLine };
       }
     }
-    this._postMessage({ type: 'setRelationList', tableName, depth, entries, tableFiles });
+    return { type: 'setRelationList', tableName, depth, entries, tableFiles, direction };
   }
 
   // ---------------------------------------------------------------------------
   // Private
   // ---------------------------------------------------------------------------
 
-  private constructor(panel: vscode.WebviewPanel) {
+  private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
     this._panel = panel;
+    this._extensionUri = extensionUri;
     this._panel.onDidDispose(() => this._dispose(), null, this._disposables);
     this._panel.webview.onDidReceiveMessage(
       (msg: RelationListIncoming) => {
@@ -87,15 +122,21 @@ export class RelationListPanel {
       null,
       this._disposables
     );
-    this._panel.webview.html = this._getHtml();
   }
 
   private _postMessage(msg: RelationListMessage): void {
     this._panel.webview.postMessage(msg);
   }
 
-  private _getHtml(): string {
+  private _getHtml(initialData: RelationListMessage): string {
+    // scriptUri is the webview-safe URI for dist/relationList.js
+    const scriptUri = this._panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(this._extensionUri, 'dist', 'relationList.js')
+    );
     const nonce = getNonce();
+    // Embed initial data directly as a global so the script can read it
+    // synchronously on load — avoids any postMessage race condition.
+    const initJson = JSON.stringify(initialData);
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -121,13 +162,21 @@ export class RelationListPanel {
                    border: 1px solid var(--vscode-input-border, #555);
                    padding: 3px 6px; border-radius: 3px; font-size: 12px; }
     #counter  { font-size: 11px; color: var(--vscode-descriptionForeground); white-space: nowrap; }
-    .toggle-group { display: flex; border: 1px solid var(--vscode-input-border, #555); border-radius: 3px; overflow: hidden; flex-shrink: 0; }
+    #dirBadge { font-size: 11px; font-weight: bold; padding: 2px 7px; border-radius: 3px;
+                background: var(--vscode-badge-background, #4d4d4d);
+                color: var(--vscode-badge-foreground, #fff); white-space: nowrap; }
+    .toggle-group { display: flex; border: 1px solid var(--vscode-input-border, #555);
+                    border-radius: 3px; overflow: hidden; flex-shrink: 0; }
     .toggle-btn { padding: 3px 10px; font-size: 11px; cursor: pointer; border: none;
                   background: var(--vscode-button-secondaryBackground, #3a3a3a);
                   color: var(--vscode-button-secondaryForeground, #ccc); white-space: nowrap; }
     .toggle-btn:hover  { background: var(--vscode-button-secondaryHoverBackground, #4a4a4a); }
     .toggle-btn.active { background: var(--vscode-button-background);
                          color: var(--vscode-button-foreground); font-weight: bold; }
+    .icon-btn { padding: 3px 8px; font-size: 11px; cursor: pointer; border: none; border-radius: 3px;
+                background: var(--vscode-button-secondaryBackground, #3a3a3a);
+                color: var(--vscode-button-secondaryForeground, #ccc); white-space: nowrap; flex-shrink: 0; }
+    .icon-btn:hover { background: var(--vscode-button-secondaryHoverBackground, #4a4a4a); }
     #tableContainer { flex: 1; overflow: auto; }
     table     { width: 100%; border-collapse: collapse; font-size: 12px; }
     thead th  { position: sticky; top: 0; z-index: 1;
@@ -153,19 +202,28 @@ export class RelationListPanel {
     .rel-count { font-size: 11px; color: var(--vscode-descriptionForeground); }
     #emptyMsg  { padding: 20px; text-align: center;
                  color: var(--vscode-descriptionForeground); font-style: italic; }
+    #pagination { display: flex; align-items: center; justify-content: center; gap: 8px;
+                  padding: 6px; border-top: 1px solid var(--vscode-panel-border); flex-shrink: 0; }
+    .pg-btn  { padding: 2px 10px; font-size: 11px; cursor: pointer; border: none; border-radius: 3px;
+               background: var(--vscode-button-secondaryBackground, #3a3a3a);
+               color: var(--vscode-button-secondaryForeground, #ccc); }
+    .pg-btn:disabled { opacity: 0.4; cursor: default; }
+    .pg-info { font-size: 11px; color: var(--vscode-descriptionForeground); }
   </style>
 </head>
 <body>
   <div id="header">
-    <div id="title">Loading\u2026</div>
-    <div id="subtitle"></div>
+    <div id="rl-title">Loading\u2026</div>
+    <div id="rl-subtitle"></div>
   </div>
   <div id="toolbar">
     <input id="filterInput" type="search" placeholder="Filter table name\u2026" />
+    <span id="dirBadge" style="display:none"></span>
     <div class="toggle-group">
       <button class="toggle-btn" id="btnByRelation">By Relation</button>
       <button class="toggle-btn active" id="btnByTable">By Table</button>
     </div>
+    <button class="icon-btn" id="btnExportCsv" title="Export current view as CSV">\u21e9 CSV</button>
     <span id="counter"></span>
   </div>
   <div id="tableContainer">
@@ -175,204 +233,9 @@ export class RelationListPanel {
       <tbody id="tableBody"></tbody>
     </table>
   </div>
-
-  <script nonce="${nonce}">
-    const vscodeApi     = acquireVsCodeApi();
-    const titleEl       = document.getElementById('title');
-    const subtitleEl    = document.getElementById('subtitle');
-    const filterInput   = document.getElementById('filterInput');
-    const counterEl     = document.getElementById('counter');
-    const relTable      = document.getElementById('relTable');
-    const theadRow      = document.querySelector('#theadRow tr');
-    const tableBody     = document.getElementById('tableBody');
-    const emptyMsg      = document.getElementById('emptyMsg');
-    const btnByRelation = document.getElementById('btnByRelation');
-    const btnByTable    = document.getElementById('btnByTable');
-
-    let allEntries = [];
-    let tableFiles = {};
-    let rootTable  = '';
-    let viewMode   = 'byTable';   // 'byRelation' | 'byTable'
-    let sortCol    = 'minHop';
-    let sortAsc    = true;
-    let filterText = '';
-
-    const HEADERS_BY_RELATION = [
-      { col: 'sourceTable', label: 'Source Table' },
-      { col: 'sourceField', label: 'Source Field' },
-      { col: 'targetTable', label: 'Target Table' },
-      { col: 'targetField', label: 'Target Field' },
-      { col: 'hopDistance', label: 'Hop' },
-      { col: 'isExternal',  label: 'Ext' }
-    ];
-    const HEADERS_BY_TABLE = [
-      { col: 'tableName',  label: 'Related Table' },
-      { col: 'minHop',     label: 'Min Hop' },
-      { col: 'relCount',   label: 'Relations' },
-      { col: 'isExternal', label: 'Ext' }
-    ];
-
-    function buildHeaders(defs) {
-      theadRow.innerHTML = '';
-      defs.forEach(def => {
-        const th = document.createElement('th');
-        th.setAttribute('data-col', def.col);
-        th.textContent = def.label;
-        if (def.col === sortCol) { th.classList.add(sortAsc ? 'sort-asc' : 'sort-desc'); }
-        th.addEventListener('click', () => {
-          if (sortCol === def.col) { sortAsc = !sortAsc; } else { sortCol = def.col; sortAsc = true; }
-          buildHeaders(defs);
-          render();
-        });
-        theadRow.appendChild(th);
-      });
-    }
-
-    // Build one row per unique related table (excluding root)
-    function buildTableRows() {
-      const map = new Map();
-      const rootLower = rootTable.toLowerCase();
-      for (const e of allEntries) {
-        addTableEntry(map, e.sourceTable, e, rootLower);
-        addTableEntry(map, e.targetTable, e, rootLower);
-      }
-      return Array.from(map.values());
-    }
-
-    function addTableEntry(map, name, entry, rootLower) {
-      if (name.toLowerCase() === rootLower) { return; }
-      if (!map.has(name)) {
-        map.set(name, { tableName: name, minHop: entry.hopDistance,
-                        relCount: 0, directCount: 0, isExternal: entry.isExternal });
-      }
-      const row = map.get(name);
-      if (entry.hopDistance < row.minHop) { row.minHop = entry.hopDistance; }
-      row.relCount++;
-      if (entry.hopDistance === 1) { row.directCount++; }
-      if (entry.isExternal) { row.isExternal = true; }
-    }
-
-    function render() {
-      if (viewMode === 'byRelation') { renderByRelation(); } else { renderByTable(); }
-    }
-
-    function applySort(rows, col, asc) {
-      rows.sort((a, b) => {
-        let va = a[col], vb = b[col];
-        if (typeof va === 'boolean') { va = va ? 1 : 0; vb = vb ? 1 : 0; }
-        if (typeof va === 'number')  { return asc ? va - vb : vb - va; }
-        return asc ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
-      });
-    }
-
-    function showEmpty(msg) {
-      relTable.style.display = 'none'; emptyMsg.style.display = ''; emptyMsg.textContent = msg;
-    }
-
-    function hopBadge(hop) {
-      const span = document.createElement('span');
-      span.className = hop === 1 ? 'badge-hop-direct' : 'badge-hop-n';
-      span.textContent = hop === 1 ? 'direct' : hop + '\u00d7';
-      return span;
-    }
-
-    function extBadge() {
-      const span = document.createElement('span'); span.className = 'badge-ext'; span.textContent = 'ext'; return span;
-    }
-
-    function linkCell(name, fileInfo) {
-      const td = document.createElement('td');
-      const span = document.createElement('span');
-      span.className = 'name-link';
-      span.textContent = name;
-      span.title = fileInfo ? 'Focus diagram \u2022 open source file' : 'Focus diagram on ' + name;
-      span.addEventListener('click', () => {
-        vscodeApi.postMessage({ type: 'focusTable', tableName: name });
-        vscodeApi.postMessage({ type: 'openFile', filePath: fileInfo ? fileInfo.filePath : '', line: fileInfo ? fileInfo.line : 0, tableName: name });
-      });
-      td.appendChild(span);
-      return td;
-    }
-
-    function renderByRelation() {
-      const q = filterText.toLowerCase();
-      let rows = q
-        ? allEntries.filter(e =>
-            e.sourceTable.toLowerCase().includes(q) || e.sourceField.toLowerCase().includes(q) ||
-            e.targetTable.toLowerCase().includes(q) || e.targetField.toLowerCase().includes(q))
-        : allEntries.slice();
-      applySort(rows, sortCol, sortAsc);
-      counterEl.textContent = rows.length + ' / ' + allEntries.length + ' relation' + (allEntries.length !== 1 ? 's' : '');
-      if (rows.length === 0) { showEmpty(allEntries.length === 0 ? 'No relations found.' : 'No matches.'); return; }
-      relTable.style.display = ''; emptyMsg.style.display = 'none'; tableBody.innerHTML = '';
-      for (const e of rows) {
-        const tr = document.createElement('tr');
-        tr.appendChild(linkCell(e.sourceTable, tableFiles[e.sourceTable]));
-        const tdSF = document.createElement('td'); tdSF.textContent = e.sourceField; tr.appendChild(tdSF);
-        tr.appendChild(linkCell(e.targetTable, tableFiles[e.targetTable]));
-        const tdTF = document.createElement('td'); tdTF.textContent = e.targetField || '\u2014'; tr.appendChild(tdTF);
-        const tdH = document.createElement('td'); tdH.appendChild(hopBadge(e.hopDistance)); tr.appendChild(tdH);
-        const tdE = document.createElement('td'); if (e.isExternal) { tdE.appendChild(extBadge()); } tr.appendChild(tdE);
-        tableBody.appendChild(tr);
-      }
-    }
-
-    function renderByTable() {
-      let rows = buildTableRows();
-      const q = filterText.toLowerCase();
-      if (q) { rows = rows.filter(r => r.tableName.toLowerCase().includes(q)); }
-      applySort(rows, sortCol, sortAsc);
-      const total = buildTableRows().length;
-      counterEl.textContent = rows.length + ' / ' + total + ' table' + (total !== 1 ? 's' : '');
-      if (rows.length === 0) { showEmpty(total === 0 ? 'No related tables found.' : 'No matches.'); return; }
-      relTable.style.display = ''; emptyMsg.style.display = 'none'; tableBody.innerHTML = '';
-      for (const r of rows) {
-        const tr = document.createElement('tr');
-        tr.appendChild(linkCell(r.tableName, tableFiles[r.tableName]));
-        const tdH = document.createElement('td'); tdH.appendChild(hopBadge(r.minHop)); tr.appendChild(tdH);
-        const tdC = document.createElement('td');
-        const cs = document.createElement('span'); cs.className = 'rel-count';
-        cs.textContent = r.relCount + (r.directCount > 0 && r.relCount !== r.directCount ? ' (' + r.directCount + ' direct)' : '');
-        tdC.appendChild(cs); tr.appendChild(tdC);
-        const tdE = document.createElement('td'); if (r.isExternal) { tdE.appendChild(extBadge()); } tr.appendChild(tdE);
-        tableBody.appendChild(tr);
-      }
-    }
-
-    function setMode(mode) {
-      viewMode = mode;
-      btnByRelation.classList.toggle('active', mode === 'byRelation');
-      btnByTable.classList.toggle('active',    mode === 'byTable');
-      filterInput.placeholder = mode === 'byTable' ? 'Filter table name\u2026' : 'Filter table or field name\u2026';
-      filterText = ''; filterInput.value = '';
-      if (mode === 'byRelation') { sortCol = 'hopDistance'; sortAsc = true; buildHeaders(HEADERS_BY_RELATION); }
-      else                       { sortCol = 'minHop';      sortAsc = true; buildHeaders(HEADERS_BY_TABLE); }
-      render();
-    }
-
-    btnByRelation.addEventListener('click', () => setMode('byRelation'));
-    btnByTable.addEventListener('click',    () => setMode('byTable'));
-    filterInput.addEventListener('input', () => { filterText = filterInput.value; render(); });
-
-    window.addEventListener('message', event => {
-      const msg = event.data;
-      if (msg.type !== 'setRelationList') { return; }
-      allEntries = msg.entries;
-      tableFiles = msg.tableFiles;
-      rootTable  = msg.tableName;
-      const directCount  = msg.entries.filter(e => e.hopDistance === 1).length;
-      const transitCount = msg.entries.length - directCount;
-      const tableCount   = buildTableRows().length;
-      titleEl.textContent  = 'Related Tables: ' + msg.tableName;
-      subtitleEl.textContent = 'Depth: ' + msg.depth + '\u00a0\u00b7\u00a0' +
-        tableCount + ' table' + (tableCount !== 1 ? 's' : '') + '\u00a0\u00b7\u00a0' +
-        directCount + ' direct, ' + transitCount + ' transitive relation' + (transitCount !== 1 ? 's' : '');
-      setMode('byTable');
-    });
-
-    // Initial header build
-    buildHeaders(HEADERS_BY_TABLE);
-  </script>
+  <div id="pagination"></div>
+  <script nonce="${nonce}">window.__RL_INIT__=${initJson};</script>
+  <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
   }

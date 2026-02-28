@@ -47,6 +47,8 @@ export interface ALField {
   dataType: string;
   /** True for fields merged from a table extension (set by TableGraph.mergeExtension) */
   isFromExtension?: boolean;
+  /** For Enum fields: the human-readable enum object name (e.g. "Gen. Posting Type") */
+  enumName?: string;
 }
 
 /** A TableRelation link from one field to a target table/field */
@@ -110,6 +112,10 @@ export interface GraphPayload {
   colors: DiagramColors;
   /** Name of the active colour theme ('dark' | 'light' | 'highContrast' | 'solarized' | 'custom') */
   colorTheme: string;
+  /** Maximum depth the slider should allow (mirrors the schema maximum, default 10) */
+  maxDepth?: number;
+  /** Maximum diagram nodes setting value — shown in the capped status message */
+  maxDiagramNodes?: number;
 }
 
 /**
@@ -132,7 +138,7 @@ export type ExtensionMessage =
   | { type: 'setGraph'; payload: GraphPayload }
   | { type: 'setLoading'; loading: boolean }
   | { type: 'setError'; message: string }
-  | { type: 'setRelationList'; tableName: string; depth: number; entries: RelatedEntry[]; tableFiles: Record<string, { filePath: string; line: number }> };
+  | { type: 'setRelationList'; tableName: string; depth: number; direction: 'out' | 'in' | 'both'; entries: RelatedEntry[]; tableFiles: Record<string, { filePath: string; line: number }> };
 
 // Messages sent from the webview to the extension
 export type WebviewMessage =

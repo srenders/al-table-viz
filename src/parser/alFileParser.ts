@@ -21,8 +21,9 @@ export interface ALTableExtension {
 
 // table 18 "Customer" {  or  table 18 Customer  or  table 18 "Customer"
 // Unquoted names may NOT contain spaces (AL rule), so cap at word-boundary
+// Allow anything after the optional opening `{` (e.g. inline `{}` or even full single-line body)
 const RE_TABLE = new RegExp(
-  `^[\\uFEFF]?table\\s+(\\d+)\\s+(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_]*))\\s*\\{?\\s*$`,
+  `^[\\uFEFF]?table\\s+(\\d+)\\s+(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_]*))\\s*(?:\\{.*)?$`,
   'i'
 );
 // tableextension 50100 "Ext" extends "Base Table" {  (names may be quoted or unquoted)
@@ -118,6 +119,14 @@ function parseRelationTargets(
   // Strip IF/ELSE IF condition blocks: IF ( condition ) → leave only the table ref
   s = s.replace(/(?:else\s+if|if)\s*\((?:[^()]*|\([^)]*\))*\)/gi, '');
   s = s.replace(/\belse\b/gi, ' ');
+
+  // Strip CASE...OF blocks: extract THEN / ELSE table names from CASE (field) OF value: Table ELSE Table
+  // Replace CASE ... OF, WHEN conditions before ':', and END keywords
+  s = s.replace(/\bcase\s*\((?:[^()]*|\([^)]*\))*\)\s*of\b/gi, '');
+  s = s.replace(/\bwhen\s+[^:]+:/gi, ' ');
+  s = s.replace(/\bend\b/gi, '');
+  s = s.replace(/\bof\b/gi, '');
+  s = s.replace(/\belse\b/gi, ' ');  // second pass after CASE stripping
 
   const results: ALRelation[] = [];
 
@@ -280,16 +289,29 @@ export function parseALFile(content: string, filePath: string): ParsedALFile {
     const fieldMatch = RE_FIELD.exec(raw);
     if (fieldMatch) {
       flushRelationBuffer();
+      const rawType = fieldMatch[3].trim();
+      // Extract enum name from types like: Enum "My Enum"  or  Enum 1234 "My Enum"
+      const enumTypeMatch = rawType.match(/^Enum\s+(?:\d+\s+)?"([^"]+)"/i)
+                         ?? rawType.match(/^Enum\s+(?:\d+\s+)?([A-Za-z_][A-Za-z0-9_ .]*)/i);
       const field: ALField = {
         id:       parseInt(fieldMatch[1], 10),
         name:     fieldMatch[2].trim(),
-        dataType: fieldMatch[3].trim()
+        dataType: enumTypeMatch ? 'Enum' : rawType,
+        ...(enumTypeMatch ? { enumName: enumTypeMatch[1].trim() } : {})
       };
       currentFieldName = field.name;
       if (currentTable) {
         currentTable.fields.push(field);
       } else if (currentExtension) {
         currentExtension.extraFields.push(field);
+      }
+      // Handle inline TableRelation on the same line as the field declaration:
+      //   field(3; "No."; Code[20]) { TableRelation = Item; }
+      if (RE_TABLE_RELATION_START.test(raw)) {
+        const trIdx = raw.toLowerCase().indexOf('tablerelation');
+        collectingRelation = true;
+        relationBuffer = [raw.slice(trIdx)];
+        if (raw.includes(';')) { flushRelationBuffer(); }
       }
       continue;
     }

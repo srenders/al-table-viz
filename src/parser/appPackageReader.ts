@@ -216,13 +216,15 @@ function resolveTableRelation(raw: unknown): { tableName: string; fieldName: str
 }
 
 /**
- * Build a human-readable AL type string from a TypeDefinition object.
- * e.g. { Name: "Code", Subtype: null } + length hint → "Code[20]"
+ * Build a human-readable AL type string (and optional enum name) from a TypeDefinition object.
+ * Returns { dataType, enumName? }.
+ * e.g. { Name: "Code", Subtype: null } + length hint → { dataType: "Code[20]" }
+ *      { Name: "Enum", Subtype: { Name: "Gen. Posting Type" } } → { dataType: "Enum", enumName: "Gen. Posting Type" }
  */
-function resolveTypeName(f: Record<string, unknown>): string {
+function resolveTypeInfo(f: Record<string, unknown>): { dataType: string; enumName?: string } {
   const td = (f['TypeDefinition'] ?? f['typeDefinition']) as Record<string, unknown> | undefined;
   if (!td) {
-    return String(f['DataType'] ?? f['dataType'] ?? f['Type'] ?? f['type'] ?? 'Unknown');
+    return { dataType: String(f['DataType'] ?? f['dataType'] ?? f['Type'] ?? f['type'] ?? 'Unknown') };
   }
   const base = String(td['Name'] ?? td['name'] ?? 'Unknown');
 
@@ -231,21 +233,27 @@ function resolveTypeName(f: Record<string, unknown>): string {
   if (args && args.length > 0) {
     const arg = args[0] as Record<string, unknown>;
     const len = arg['Name'] ?? arg['name'];
-    if (len !== undefined) { return `${base}[${len}]`; }
+    if (len !== undefined) { return { dataType: `${base}[${len}]` }; }
   }
 
   // Some older symbol files store length directly on TypeDefinition
   const len = td['Length'] ?? td['length'];
-  if (len !== undefined) { return `${base}[${len}]`; }
+  if (len !== undefined) { return { dataType: `${base}[${len}]` }; }
 
-  // Enum / Record subtype name
+  // Enum / Record subtype name — keep dataType as the base kind, expose name separately
   const sub = td['Subtype'] as Record<string, unknown> | undefined;
   if (sub) {
-    const subName = String(sub['Name'] ?? sub['name'] ?? '');
-    if (subName) { return `${base}(${subName})`; }
+    const subName = String(sub['Name'] ?? sub['name'] ?? '').trim();
+    if (subName) {
+      const baseLower = base.toLowerCase();
+      if (baseLower === 'enum' || baseLower === 'record') {
+        return { dataType: base, enumName: subName };
+      }
+      return { dataType: `${base}(${subName})` };
+    }
   }
 
-  return base;
+  return { dataType: base };
 }
 
 /**
@@ -299,7 +307,10 @@ function extractTableDefs(manifest: unknown, log: string[], depth = 0, nsName = 
       const fId   = Number(f['Id']   ?? f['id']   ?? 0);
       const fName = String(f['Name'] ?? f['name'] ?? '').replace(/^"|"$/g, '').trim();
       if (!fName) { continue; }
-      fields.push({ id: fId, name: fName, dataType: resolveTypeName(f) });
+      const typeInfo = resolveTypeInfo(f);
+      const field: ALField = { id: fId, name: fName, dataType: typeInfo.dataType };
+      if (typeInfo.enumName) { field.enumName = typeInfo.enumName; }
+      fields.push(field);
 
       // Extract TableRelation if present
       const rawRel = f['TableRelation'] ?? f['tableRelation'];

@@ -2,13 +2,31 @@
 
 All notable changes to AL Table Visualizer will be documented here.
 
+## [0.1.5] — 2026-02-28
+
+### Added
+- **Back / Forward navigation** — ‹/› buttons in the diagram toolbar navigate through the focus history within a session
+- **BFS-ranked node cap** — when the diagram exceeds the `alTableViz.maxDiagramNodes` limit, the closest tables survive and a notice shows the full count with a link to raise the limit
+- **`alTableViz.maxDiagramNodes` setting** — configures the maximum number of table nodes rendered at once (default 60, range 10–500)
+- **`alTableViz.excludedAppPackages` setting** — list of `.app` filename substrings to skip during scanning; useful for excluding large third-party packages
+- **`AL Table Viz: Re-scan Workspace` command** — force a full re-parse of all source files and `.app` packages, clearing all caches
+- **Disk cache for `.app` packages** — parsed symbol packages are now persisted to VS Code global storage (keyed by path + mtime + size); subsequent workspace opens skip re-parsing unchanged `.app` files
+- **Incremental AL rescan** — when `.al` files change, only the modified files are re-parsed; the rest of the graph is preserved
+- **Relations List enhancements** — direction badge showing _Out / In / Both_; pagination (100 rows per page); CSV export; hop-distance and external-table badges; sortable and filterable columns
+- **Enum field labels** — fields declared as `Enum "Name"` now show the enum type name rather than a numeric ID
+- **CASE/WHEN `TableRelation` parsing** — multi-branch `CASE … OF … WHEN` relation values are fully parsed and indexed
+- **Namespace hint** — when no tables match the selected namespace filter an inline hint suggests switching to namespace mode
+
+### Fixed
+- `RE_TABLE` regex now correctly matches table declarations with an inline `{ }` body on the same line
+- Inline `TableRelation` values on the same line as the field declaration are now collected (were silently skipped)
+- BFS `depth ≥ 2` with direction `In` now correctly expands intermediate nodes in both directions, making transitive targets reachable
+
 ## [0.1.4] — 2026-02-27
 
 ### Added
 - **Colour themes** — four built-in palettes selectable from a dropdown in the diagram toolbar: _Dark_ (default), _Light_, _High Contrast_, and _Solarized Dark_
 - **Live theme switching** — selecting a theme in the toolbar applies it instantly and persists the choice to `alTableViz.colorTheme`; changing the setting externally also re-renders live
-
-### Added
 - **Related Tables list panel** — click the `🔗 Related` toolbar button or run _Find Related Tables_ to open a sortable panel showing all tables reachable from the focused table
 - **By Table / By Relation toggle** — deduplicate the list by unique related table (showing min-hop and relation count) or expand to individual field-level relation rows
 - **Single-click node sync** — clicking a node in the diagram updates the relation list panel if it is open

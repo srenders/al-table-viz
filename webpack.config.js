@@ -55,6 +55,29 @@ const config = [
       ]
     },
     devtool: 'nosources-source-map'
+  },
+  // RelationList webview bundle
+  {
+    target: 'web',
+    mode: 'none',
+    entry: './src/webview/relationList.ts',
+    output: {
+      path: path.resolve(__dirname, 'dist'),
+      filename: 'relationList.js'
+    },
+    resolve: {
+      extensions: ['.ts', '.js']
+    },
+    module: {
+      rules: [
+        {
+          test: /\.ts$/,
+          exclude: /node_modules/,
+          use: [{ loader: 'ts-loader', options: { configFile: path.resolve(__dirname, 'tsconfig.webview.json') } }]
+        }
+      ]
+    },
+    devtool: 'nosources-source-map'
   }
 ];
 

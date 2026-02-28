@@ -2,7 +2,7 @@
   "name": "al-table-viz",
   "displayName": "AL Table Visualizer",
   "description": "Visualize Business Central AL table relationships as interactive ER diagrams",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publisher": "StevenRenders",
   "author": {
     "name": "Steven Renders",
@@ -47,6 +47,10 @@
       {
         "command": "alTableViz.findRelated",
         "title": "AL Table Viz: Find Related Tables"
+      },
+      {
+        "command": "alTableViz.rescan",
+        "title": "AL Table Viz: Re-scan Workspace"
       }
     ],
     "menus": {
@@ -91,6 +95,19 @@
             "Solarized Dark colour scheme."
           ],
           "description": "Colour theme for the AL Table diagram."
+        },
+        "alTableViz.maxDiagramNodes": {
+          "type": "number",
+          "default": 60,
+          "minimum": 10,
+          "maximum": 500,
+          "description": "Maximum number of table nodes to show in the diagram at once. Increase this for larger diagrams (may slow down layout)."
+        },
+        "alTableViz.excludedAppPackages": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "List of .app package filename substrings to exclude from the external table scan (e.g. \"ThirdParty.app\"). Comparison is case-insensitive."
         }
       }
     }

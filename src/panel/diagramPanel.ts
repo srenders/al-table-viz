@@ -25,30 +25,46 @@ function prepareFields(tables: ALTable[], keepFieldsFor?: string): ALTable[] {
  * the initial render fast without hiding nearby context.
  * This is purely a performance guard — data accuracy is never affected.
  * The UI shows a notice when the graph was trimmed (capped=true in payload).
+ * Overridden by the alTableViz.maxDiagramNodes setting.
  */
-const MAX_DIAGRAM_NODES = 60;
+const DEFAULT_MAX_DIAGRAM_NODES = 60;
+
+function getMaxDiagramNodes(): number {
+  return vscode.workspace.getConfiguration('alTableViz').get<number>('maxDiagramNodes', DEFAULT_MAX_DIAGRAM_NODES);
+}
 
 /**
- * Trim the subgraph to at most MAX_DIAGRAM_NODES tables.
+ * Trim the subgraph to at most maxNodes tables.
  * The focus table is always inserted first so it is never dropped.
+ * Tables are sorted by their BFS distance from the focus table so that the
+ * closest neighbours survive the cap rather than being cut arbitrarily.
  * Relations are re-filtered so only edges between retained nodes remain.
  * Only called at depth >= 2; at depth=1 all direct neighbours are shown in full.
  */
 function capSubgraph(
   tables: ALTable[], relations: ALRelation[],
-  focusTable: string | null
+  focusTable: string | null,
+  distances?: Map<string, number>
 ): { tables: ALTable[]; relations: ALRelation[]; capped: boolean; totalTables: number } {
+  const maxNodes = getMaxDiagramNodes();
   const total = tables.length;
-  if (total <= MAX_DIAGRAM_NODES) {
+  if (total <= maxNodes) {
     return { tables, relations, capped: false, totalTables: total };
   }
   const focus = focusTable?.toLowerCase();
-  const kept: ALTable[] = [];
   const focusRow = tables.find(t => t.name.toLowerCase() === focus);
-  if (focusRow) { kept.push(focusRow); }
-  for (const t of tables) {
-    if (kept.length >= MAX_DIAGRAM_NODES) { break; }
-    if (t.name.toLowerCase() === focus) { continue; }
+  // Sort non-focus tables by BFS distance (closest first) so nearby tables survive the cap
+  const rest = tables.filter(t => t.name.toLowerCase() !== focus);
+  if (distances) {
+    rest.sort((a, b) => {
+      const da = distances.get(a.name.toLowerCase()) ?? 9999;
+      const db = distances.get(b.name.toLowerCase()) ?? 9999;
+      return da - db;
+    });
+  }
+  const kept: ALTable[] = focusRow ? [focusRow] : [];
+  for (const t of rest) {
+    if (kept.length >= maxNodes) { break; }
     kept.push(t);
   }
   const keptNames = new Set(kept.map(t => t.name.toLowerCase()));
@@ -61,16 +77,21 @@ function capSubgraph(
 export class DiagramPanel {
   private static _instance: DiagramPanel | undefined;
   /**
-   * Output channel created lazily on first use.
-   * Avoids creating the channel before the extension is activated or when the
-   * diagram panel is never opened.
+   * Shared output channel — injected by extension.ts from the WorkspaceScanner
+   * so that both components write to the same 'AL Table Visualizer' channel.
    */
   private static _outChannel: vscode.OutputChannel | undefined;
   private static get _out(): vscode.OutputChannel {
     if (!DiagramPanel._outChannel) {
-      DiagramPanel._outChannel = vscode.window.createOutputChannel('AL Table Viz – Diagram');
+      // Fallback: create own channel if setOutputChannel was never called
+      DiagramPanel._outChannel = vscode.window.createOutputChannel('AL Table Visualizer');
     }
     return DiagramPanel._outChannel;
+  }
+
+  /** Called by extension.ts to share the WorkspaceScanner's output channel. */
+  static setOutputChannel(channel: vscode.OutputChannel): void {
+    DiagramPanel._outChannel = channel;
   }
 
   private readonly _panel: vscode.WebviewPanel;
@@ -155,7 +176,7 @@ export class DiagramPanel {
       this._panel.reveal(undefined, true); // bring diagram column into view without stealing focus
       // Also update the list panel for the newly focused table
       if (this._graph && RelationListPanel.instance) {
-        RelationListPanel.instance.update(this._graph, tableName, this._depth);
+        RelationListPanel.instance.update(this._graph, tableName, this._depth, this._direction);
       }
     };
 
@@ -214,10 +235,11 @@ export class DiagramPanel {
       // Then cap the payload size to stay well under the 2 MB postMessage limit.
       const slimmed = prepareFields(sub.tables, this._focusTable);
       // At depth=1 show ALL direct neighbours (no cap) so the slider
-      // meaningfully adds nodes when increased. At depth>=2 cap to MAX_DIAGRAM_NODES.
+      // meaningfully adds nodes when increased. At depth>=2 cap to maxDiagramNodes.
       const capped = this._depth <= 1
         ? { tables: slimmed, relations: sub.relations, capped: false, totalTables: slimmed.length }
-        : capSubgraph(slimmed, sub.relations, this._focusTable);
+        : capSubgraph(slimmed, sub.relations, this._focusTable, sub.distances);
+      const maxDiagramNodes = getMaxDiagramNodes();
       payload = {
         tables: capped.tables,
         relations: capped.relations,
@@ -227,6 +249,8 @@ export class DiagramPanel {
         direction: this._direction,
         focusTable: this._focusTable,
         depth: this._depth,
+        maxDepth: 10,
+        maxDiagramNodes,
         namespaces,
         sidebarItems,
         colors,
@@ -239,6 +263,8 @@ export class DiagramPanel {
         relations: [],
         focusTable: null,
         depth: this._depth,
+        maxDepth: 10,
+        maxDiagramNodes: getMaxDiagramNodes(),
         namespaces,
         sidebarItems,
         colors,
@@ -252,6 +278,8 @@ export class DiagramPanel {
         relations: sub.relations,
         focusTable: null,
         depth: this._depth,
+        maxDepth: 10,
+        maxDiagramNodes: getMaxDiagramNodes(),
         namespaces,
         sidebarItems: [],
         colors,
@@ -292,11 +320,12 @@ export class DiagramPanel {
 
       case 'focusTable':
         this._focusTable = msg.tableName;
-        this._direction = 'out'; // reset direction for each new focus
+        // Preserve current direction — the user may have chosen 'in' or 'both'
+        // and navigating to a new table should keep that context.
         this._sendGraph();
         // Sync relation list panel if it is already open
         if (this._graph && RelationListPanel.instance) {
-          RelationListPanel.instance.update(this._graph, msg.tableName, this._depth);
+          RelationListPanel.instance.update(this._graph, msg.tableName, this._depth, this._direction);
         }
         break;
 
@@ -310,7 +339,7 @@ export class DiagramPanel {
         this._sendGraph();
         // Sync relation list panel when depth changes and a table is focused
         if (this._graph && this._focusTable && RelationListPanel.instance) {
-          RelationListPanel.instance.update(this._graph, this._focusTable, this._depth);
+          RelationListPanel.instance.update(this._graph, this._focusTable, this._depth, this._direction);
         }
         break;
 
@@ -322,6 +351,9 @@ export class DiagramPanel {
             // Empty filter: re-send normal graph state
             this._sendGraph();
           } else {
+            // Clear focus/namespace state so a subsequent setDepth re-sends the filtered result
+            this._focusTable = null;
+            this._namespace  = null;
             const filtered = this._graph.filterByName(msg.query);
             const ftColors = this._resolveColors();
             const ftTheme  = vscode.workspace.getConfiguration('alTableViz').get<string>('colorTheme', DEFAULT_THEME);
@@ -330,6 +362,8 @@ export class DiagramPanel {
               relations: filtered.relations,
               focusTable: null,
               depth: this._depth,
+              maxDepth: 10,
+              maxDiagramNodes: getMaxDiagramNodes(),
               namespaces,
               sidebarItems,
               colors: ftColors,
@@ -349,14 +383,14 @@ export class DiagramPanel {
       case 'findRelated':
         // Open / refresh the relation list panel for the given table
         if (this._graph) {
-          RelationListPanel.show(this._extensionUri, this._graph, msg.tableName, this._depth);
+          RelationListPanel.show(this._extensionUri, this._graph, msg.tableName, this._depth, this._direction);
         }
         break;
 
       case 'syncRelated':
         // Single-click on a node: update the list panel only if it is already open
         if (this._graph && RelationListPanel.instance) {
-          RelationListPanel.instance.update(this._graph, msg.tableName, this._depth);
+          RelationListPanel.instance.update(this._graph, msg.tableName, this._depth, this._direction);
         }
         break;
 
@@ -379,9 +413,8 @@ export class DiagramPanel {
           });
           if (!picked) { return; }
           this._focusTable = picked;
-          this._direction = 'out';
           this._sendGraph();
-          RelationListPanel.show(this._extensionUri, this._graph!, picked, this._depth);
+          RelationListPanel.show(this._extensionUri, this._graph!, picked, this._depth, this._direction);
         })();
         break;
     }
@@ -498,6 +531,8 @@ export class DiagramPanel {
     <select id="nsFilter">
       <option value="">All / Source tables</option>
     </select>
+    <button class="zoom-btn" id="btnBack" title="Navigate back" disabled>&#x2039;</button>
+    <button class="zoom-btn" id="btnFwd"  title="Navigate forward" disabled>&#x203A;</button>
     <label for="depthSlider">Depth:</label>
     <input id="depthSlider" type="range" min="1" max="5" value="2" />
     <span id="depthVal">2</span>
@@ -539,6 +574,8 @@ export class DiagramPanel {
       <ul id="tableList"></ul>
     </div>
     <div id="cy"></div>
+    <!-- Namespace mode empty-state hint -->
+    <div id="nsHint" class="hidden" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;"><span style="padding:16px 24px;border-radius:6px;font-size:13px;background:var(--vscode-editor-background);border:1px solid var(--vscode-panel-border);color:var(--vscode-descriptionForeground);">&#x2190; Select a table from the list to explore its relations.</span></div>
   </div>
 
   <script nonce="${nonce}" src="${scriptUri}"></script>

@@ -60,6 +60,9 @@ const btnExportSvg      = document.getElementById('btnExportSvg')!;
 const btnExportMermaid  = document.getElementById('btnExportMermaid')!;
 const btnFindRelated    = document.getElementById('btnFindRelated')!;
 const themePicker       = document.getElementById('themePicker') as HTMLSelectElement;;
+const btnBack           = document.getElementById('btnBack') as HTMLButtonElement;
+const btnFwd            = document.getElementById('btnFwd')  as HTMLButtonElement;
+const nsHintEl          = document.getElementById('nsHint')!;
 // ---------------------------------------------------------------------------
 // Sidebar + context menu state
 // ---------------------------------------------------------------------------
@@ -69,6 +72,32 @@ let ctxNodeName            = '';
 let ctxNodeFilePath        = '';
 let ctxNodeDeclarationLine = 1;
 let lastPayload: GraphPayload | null = null;
+
+// ---------------------------------------------------------------------------
+// Back/Forward navigation history (webview-local; does not persist)
+// ---------------------------------------------------------------------------
+let navHistory: string[] = [];
+let navIndex = -1;
+
+function navPush(tableName: string): void {
+  // Discard any forward history when navigating to a new table
+  navHistory = navHistory.slice(0, navIndex + 1);
+  if (navHistory[navIndex] !== tableName) {
+    navHistory.push(tableName);
+    navIndex = navHistory.length - 1;
+  }
+  updateNavButtons();
+}
+
+function updateNavButtons(): void {
+  btnBack.disabled = navIndex <= 0;
+  btnFwd.disabled  = navIndex >= navHistory.length - 1;
+}
+
+function doFocusTable(tableName: string): void {
+  navPush(tableName);
+  postMsg({ type: 'focusTable', tableName });
+}
 
 // ---------------------------------------------------------------------------
 // Active colour palette — updated from each GraphPayload
@@ -114,7 +143,7 @@ function initCy(): Core {
   // Double-click → focus subgraph on that table
   cy.on('dblclick', 'node', evt => {
     const tableName = evt.target.data('tableName') as string;
-    if (tableName) { postMsg({ type: 'focusTable', tableName }); }
+    if (tableName) { doFocusTable(tableName); }
   });
 
   // Right-click → context menu (handled via native contextmenu on cyEl above)
@@ -332,8 +361,13 @@ function renderGraph(payload: GraphPayload): void {
     instance.fit(undefined, 30);
   }
 
+  const maxDiagramNodes = payload.maxDiagramNodes ?? 60;
   statusEl.textContent = `${tables.length} table(s) · ${relations.length} relation(s)` +
-    (payload.capped ? ` — showing ${tables.length} of ${payload.totalTables} (reduce depth to see all)` : '');
+    (payload.capped ? ` — showing ${tables.length} of ${payload.totalTables} (increase alTableViz.maxDiagramNodes, currently ${maxDiagramNodes})` : '');
+
+  // Show namespace empty-state hint when in namespace mode with no tables
+  const isNamespaceEmpty = tables.length === 0 && (payload.sidebarItems ?? []).length > 0;
+  nsHintEl.classList.toggle('hidden', !isNamespaceEmpty);
 }
 
 // ---------------------------------------------------------------------------
@@ -383,7 +417,7 @@ function renderSidebar(items: string[], active: string | null, filter = ''): voi
     li.title = name;
     if (name === active) { li.classList.add('active'); }
     li.addEventListener('click', () => {
-      postMsg({ type: 'focusTable', tableName: name });
+      doFocusTable(name);
     });
     li.addEventListener('contextmenu', e => {
       e.preventDefault();
@@ -572,10 +606,12 @@ btnReset.addEventListener('click', () => {
   searchInput.value = '';
   sidebarSearchEl.value = '';
   nsFilter.value = '';
+  navHistory = []; navIndex = -1; updateNavButtons();
   postMsg({ type: 'filterByNamespace', namespace: '' });
 });
 
 btnClearFocus.addEventListener('click', () => {
+  navHistory = []; navIndex = -1; updateNavButtons();
   // Return to namespace list (or source view if no namespace active)
   postMsg({ type: 'filterByNamespace', namespace: nsFilter.value });
 });
@@ -594,7 +630,7 @@ sidebarSearchEl.addEventListener('input', () => {
 // Context menu actions
 ctxFocusEl.addEventListener('click', () => {
   hideCtxMenu();
-  if (ctxNodeName) { postMsg({ type: 'focusTable', tableName: ctxNodeName }); }
+  if (ctxNodeName) { doFocusTable(ctxNodeName); }
 });
 ctxOpenEl.addEventListener('click', () => {
   hideCtxMenu();
@@ -611,6 +647,22 @@ btnDirection.addEventListener('click', () => {
   currentDir = dirCycle[(dirCycle.indexOf(currentDir) + 1) % dirCycle.length];
   btnDirection.textContent = dirLabels[currentDir];
   postMsg({ type: 'setDirection', direction: currentDir });
+});
+
+// Back / Forward navigation
+btnBack.addEventListener('click', () => {
+  if (navIndex > 0) {
+    navIndex--;
+    updateNavButtons();
+    postMsg({ type: 'focusTable', tableName: navHistory[navIndex] });
+  }
+});
+btnFwd.addEventListener('click', () => {
+  if (navIndex < navHistory.length - 1) {
+    navIndex++;
+    updateNavButtons();
+    postMsg({ type: 'focusTable', tableName: navHistory[navIndex] });
+  }
 });
 
 btnFit.addEventListener('click', () => { cy?.fit(undefined, 40); });
@@ -690,9 +742,35 @@ function mmdSanitizeAttr(raw: string): string {
 function generateMermaid(payload: GraphPayload): string {
   const lines: string[] = ['erDiagram', ''];
 
+  // Build a sanitized-name map with collision resolution
+  // (two tables whose names sanitize to the same identifier get numeric suffixes)
+  const sanitizedNames = new Map<string, string>(); // originalName → finalSanitized
+  const usedKeys       = new Map<string, number>();  // bare key (no quotes) → use count
+  const renames: string[] = [];
+
+  for (const t of payload.tables) {
+    const sanitized = mmdSanitizeName(t.name);
+    const key = sanitized.replace(/"/g, '');
+    const count = usedKeys.get(key) ?? 0;
+    if (count === 0) {
+      sanitizedNames.set(t.name, sanitized);
+      usedKeys.set(key, 1);
+    } else {
+      const newKey = `${key}_${count + 1}`;
+      renames.push(`%% Renamed collision: "${t.name}" → ${newKey}`);
+      sanitizedNames.set(t.name, newKey);
+      usedKeys.set(key, count + 1);
+    }
+  }
+
+  if (renames.length > 0) {
+    lines.push(...renames);
+    lines.push('');
+  }
+
   // Entity blocks — one per table in the current view
   for (const t of payload.tables) {
-    const eName = mmdSanitizeName(t.name);
+    const eName = sanitizedNames.get(t.name) ?? mmdSanitizeName(t.name);
     lines.push(`  ${eName} {`);
     if (t.fields.length === 0) {
       lines.push(`    string _empty`);
@@ -712,16 +790,13 @@ function generateMermaid(payload: GraphPayload): string {
   lines.push('');
 
   // Relationship lines — deduplicated, same logic as diagram edges
-  // Mermaid notation: A }o--|| B : "label"
-  //   }o = zero-or-more on source (many)  ||  = exactly one on target (one)
-  // Dashed (..) for conditional
   const seen = new Set<string>();
   for (const r of payload.relations) {
     const key = `${r.sourceTable}||${r.targetTable}||${r.sourceField}`;
     if (seen.has(key)) { continue; }
     seen.add(key);
-    const src   = mmdSanitizeName(r.sourceTable);
-    const tgt   = mmdSanitizeName(r.targetTable);
+    const src   = sanitizedNames.get(r.sourceTable) ?? mmdSanitizeName(r.sourceTable);
+    const tgt   = sanitizedNames.get(r.targetTable) ?? mmdSanitizeName(r.targetTable);
     const label = r.targetField
       ? `"${r.sourceField} to ${r.targetField}"`
       : `"${r.sourceField}"`;
@@ -753,6 +828,7 @@ window.addEventListener('message', (event: MessageEvent<ExtensionMessage>) => {
       // the new colours when initCy() is called inside renderGraph().
       activeColors = { ...msg.payload.colors };
       themePicker.value = msg.payload.colorTheme ?? DEFAULT_THEME;
+      depthSlider.max   = String(msg.payload.maxDepth ?? 10);
       depthSlider.value = String(msg.payload.depth);
       depthVal.textContent = String(msg.payload.depth);
       populateNamespaces(msg.payload.namespaces ?? []);
