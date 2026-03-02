@@ -101,6 +101,8 @@ export class DiagramPanel {
   private _graph: TableGraph | null = null;
   private _focusTable: string | null = null;
   private _namespace: string | null = null;
+  private _sourceFolder: string | null = null;
+  private _appPackage: string | null = null;
   private _depth: number;
   private _direction: 'out' | 'in' | 'both' = 'out';
 
@@ -209,7 +211,9 @@ export class DiagramPanel {
 
     const colors     = this._resolveColors();
     const colorTheme = vscode.workspace.getConfiguration('alTableViz').get<string>('colorTheme', DEFAULT_THEME);
-    const namespaces  = this._graph.getNamespaces();
+    const namespaces   = this._graph.getNamespaces();
+    const appPackages  = this._graph.getAppPackages();
+    const sourceFolders = this._graph.getSourceFolders();
     const sidebarItems = this._namespace
       ? this._graph.getTableNamesForNamespace(this._namespace)
       : [];
@@ -252,6 +256,8 @@ export class DiagramPanel {
         maxDepth: 10,
         maxDiagramNodes,
         namespaces,
+        appPackages,
+        sourceFolders,
         sidebarItems,
         colors,
         colorTheme
@@ -266,13 +272,36 @@ export class DiagramPanel {
         maxDepth: 10,
         maxDiagramNodes: getMaxDiagramNodes(),
         namespaces,
+        appPackages,
+        sourceFolders,
         sidebarItems,
+        colors,
+        colorTheme
+      };
+    } else if (this._appPackage) {
+      // App package filter mode: show tables from this package + their neighbours
+      const sub = this._graph.getSubgraphForAppPackage(this._appPackage, this._depth);
+      const capped = capSubgraph(prepareFields(sub.tables), sub.relations, null);
+      payload = {
+        tables: capped.tables,
+        relations: capped.relations,
+        capped: capped.capped,
+        totalTables: capped.totalTables,
+        focusTable: null,
+        depth: this._depth,
+        maxDepth: 10,
+        maxDiagramNodes: getMaxDiagramNodes(),
+        namespaces,
+        appPackages,
+        sourceFolders,
+        sidebarItems: [],
         colors,
         colorTheme
       };
     } else {
       // Default view: source tables + their neighbours up to _depth hops.
-      const sub = this._graph.getSourceSubgraph(this._depth);
+      // Optionally restricted to a single workspace folder via _sourceFolder.
+      const sub = this._graph.getSourceSubgraph(this._depth, this._sourceFolder ?? undefined);
       payload = {
         tables: prepareFields(sub.tables),
         relations: sub.relations,
@@ -281,6 +310,8 @@ export class DiagramPanel {
         maxDepth: 10,
         maxDiagramNodes: getMaxDiagramNodes(),
         namespaces,
+        appPackages,
+        sourceFolders,
         sidebarItems: [],
         colors,
         colorTheme
@@ -346,14 +377,18 @@ export class DiagramPanel {
       case 'filterTables':
         if (this._graph) {
           const namespaces   = this._graph.getNamespaces();
+          const appPackages  = this._graph.getAppPackages();
+          const sourceFolders = this._graph.getSourceFolders();
           const sidebarItems = this._namespace ? this._graph.getTableNamesForNamespace(this._namespace) : [];
           if (!msg.query.trim()) {
             // Empty filter: re-send normal graph state
             this._sendGraph();
           } else {
-            // Clear focus/namespace state so a subsequent setDepth re-sends the filtered result
-            this._focusTable = null;
-            this._namespace  = null;
+            // Clear focus/namespace/app/folder state so a subsequent setDepth re-sends the filtered result
+            this._focusTable    = null;
+            this._namespace     = null;
+            this._appPackage    = null;
+            this._sourceFolder  = null;
             const filtered = this._graph.filterByName(msg.query);
             const ftColors = this._resolveColors();
             const ftTheme  = vscode.workspace.getConfiguration('alTableViz').get<string>('colorTheme', DEFAULT_THEME);
@@ -365,6 +400,8 @@ export class DiagramPanel {
               maxDepth: 10,
               maxDiagramNodes: getMaxDiagramNodes(),
               namespaces,
+              appPackages,
+              sourceFolders,
               sidebarItems,
               colors: ftColors,
               colorTheme: ftTheme
@@ -377,6 +414,22 @@ export class DiagramPanel {
       case 'filterByNamespace':
         this._namespace = msg.namespace || null;
         this._focusTable = null;
+        this._appPackage = null;
+        this._sendGraph();
+        break;
+
+      case 'filterByAppPackage':
+        this._appPackage = msg.appPackage || null;
+        this._focusTable = null;
+        this._namespace  = null;
+        this._sendGraph();
+        break;
+
+      case 'filterBySourceFolder':
+        this._sourceFolder = msg.folder || null;
+        this._focusTable   = null;
+        this._namespace    = null;
+        this._appPackage   = null;
         this._sendGraph();
         break;
 
@@ -401,20 +454,33 @@ export class DiagramPanel {
         break;
 
       case 'pickTable':
-        // Show QuickPick, then focus diagram + open relation list panel
+        // Show QuickPick with source tables only (external app-package tables are excluded).
+        // If a project folder filter is active, only show tables from that folder.
         void (async () => {
           if (!this._graph) { return; }
-          const names = this._graph.getTables()
-            .map(t => t.name)
-            .sort((a, b) => a.localeCompare(b));
-          const picked = await vscode.window.showQuickPick(names, {
-            placeHolder: 'Select a table to find all related tables…',
-            title: 'AL Table Viz: Find Related Tables'
+          const sourceTables = this._graph.getTables()
+            .filter(t => {
+              if (t.isExternal) { return false; }
+              if (this._sourceFolder && t.sourceFolder !== this._sourceFolder) { return false; }
+              return true;
+            })
+            .sort((a, b) => a.name.localeCompare(b.name));
+
+          const items: vscode.QuickPickItem[] = sourceTables.map(t => ({
+            label: t.name,
+            description: t.sourceFolder ?? ''
+          }));
+
+          const folderNote = this._sourceFolder ? ` in ${this._sourceFolder}` : '';
+          const picked = await vscode.window.showQuickPick(items, {
+            placeHolder: `Select a source table${folderNote} to find all related tables…`,
+            title: 'AL Table Viz: Find Related Tables',
+            matchOnDescription: true
           });
           if (!picked) { return; }
-          this._focusTable = picked;
+          this._focusTable = picked.label;
           this._sendGraph();
-          RelationListPanel.show(this._extensionUri, this._graph!, picked, this._depth, this._direction);
+          RelationListPanel.show(this._extensionUri, this._graph!, picked.label, this._depth, this._direction);
         })();
         break;
     }
@@ -460,6 +526,16 @@ export class DiagramPanel {
                 border: 1px solid var(--vscode-input-border, #555);
                 padding: 3px 6px; border-radius: 3px; font-size: 12px;
                 max-width: 200px; }
+    #folderFilter { background: var(--vscode-input-background);
+                    color: var(--vscode-input-foreground);
+                    border: 1px solid var(--vscode-input-border, #555);
+                    padding: 3px 6px; border-radius: 3px; font-size: 12px;
+                    max-width: 180px; }
+    #appFilter { background: var(--vscode-input-background);
+                 color: var(--vscode-input-foreground);
+                 border: 1px solid var(--vscode-input-border, #555);
+                 padding: 3px 6px; border-radius: 3px; font-size: 12px;
+                 max-width: 200px; }
     #themePicker { background: var(--vscode-input-background);
                    color: var(--vscode-input-foreground);
                    border: 1px solid var(--vscode-input-border, #555);
@@ -527,9 +603,17 @@ export class DiagramPanel {
   <div id="toolbar">
     <label for="searchInput">Filter:</label>
     <input id="searchInput" type="search" placeholder="Table name…" />
+    <label for="folderFilter">Project:</label>
+    <select id="folderFilter">
+      <option value="">All projects</option>
+    </select>
     <label for="nsFilter">Namespace:</label>
     <select id="nsFilter">
       <option value="">All / Source tables</option>
+    </select>
+    <label for="appFilter">App package:</label>
+    <select id="appFilter">
+      <option value="">All app packages</option>
     </select>
     <button class="zoom-btn" id="btnBack" title="Navigate back" disabled>&#x2039;</button>
     <button class="zoom-btn" id="btnFwd"  title="Navigate forward" disabled>&#x203A;</button>

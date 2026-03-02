@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { parseALFile, ALTableExtension } from '../parser/alFileParser';
 import { readAppPackage } from '../parser/appPackageReader';
 import { AppPackageCache } from '../parser/appPackageCache';
@@ -160,6 +161,12 @@ export class WorkspaceScanner {
         const content = await fs.readFile(uri.fsPath, 'utf8');
         const parsed  = parseALFile(content, uri.fsPath);
 
+        // Stamp each source table with the workspace folder name
+        const wsFolder = vscode.workspace.getWorkspaceFolder(uri);
+        if (wsFolder) {
+          for (const t of parsed.tables) { t.sourceFolder = wsFolder.name; }
+        }
+
         if (parsed.tables.length > 0) {
           out.appendLine(`  ${uri.fsPath} → ${parsed.tables.length} table(s): ${parsed.tables.map(t => t.name).join(', ')}`);
         }
@@ -190,6 +197,9 @@ export class WorkspaceScanner {
       const relKeys = new Set<string>(
         relations.map(r => `${r.sourceTable.toLowerCase()}||${r.sourceField.toLowerCase()}||${r.targetTable.toLowerCase()}`)
       );
+      // Track content hashes of .app files already processed this scan run.
+      // Identical files in multiple .alpackages folders share one parse operation.
+      const processedAppHashes = new Set<string>();
       for (const uri of appFiles) {
         const basename = path.basename(uri.fsPath).toLowerCase();
         // Skip packages matching the exclusion list
@@ -201,24 +211,33 @@ export class WorkspaceScanner {
           const shortName = uri.fsPath.split(/[\\/]/).slice(-2).join('/');
           let result: Awaited<ReturnType<typeof readAppPackage>>;
 
-          // Try disk cache first
-          const stat = await fs.stat(uri.fsPath);
+          // Read bytes and compute content hash for path-independent deduplication
+          const bytes = await fs.readFile(uri.fsPath);
+          const contentHash = crypto.createHash('sha256').update(bytes).digest('hex');
+
+          // Skip if a file with identical content was already processed this run
+          if (processedAppHashes.has(contentHash)) {
+            out.appendLine(`  [${shortName}] Skipped duplicate (same content as another .alpackages copy)`);
+            continue;
+          }
+          processedAppHashes.add(contentHash);
+
+          // Try content-hash-keyed disk cache
           const cached = this._appCache
-            ? await this._appCache.get(uri.fsPath, stat.mtimeMs, stat.size)
+            ? await this._appCache.get(contentHash)
             : null;
 
           if (cached) {
             out.appendLine(`  [${shortName}] Using cached result (${cached.tables.length} tables)`);
             result = cached;
           } else {
-            const bytes = await fs.readFile(uri.fsPath);
             result = await readAppPackage(new Uint8Array(bytes), uri.fsPath);
             for (const line of result.log) {
               out.appendLine(`  [${shortName}] ${line}`);
             }
             // Write to cache asynchronously (non-blocking)
             if (this._appCache) {
-              this._appCache.set(uri.fsPath, stat.mtimeMs, stat.size, result).catch(() => {});
+              this._appCache.set(contentHash, result).catch(() => {});
             }
           }
 

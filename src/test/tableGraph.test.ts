@@ -10,8 +10,17 @@ import { ALTable, ALRelation } from '../model/types';
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function makeTable(name: string, isExternal = false, namespace?: string): ALTable {
-  return { id: 1, name, filePath: '', declarationLine: 1, fields: [], isExternal, namespace };
+function makeTable(name: string, isExternal = false, namespace?: string, sourceFolder?: string): ALTable {
+  return { id: 1, name, filePath: '', declarationLine: 1, fields: [], isExternal, namespace, sourceFolder };
+}
+
+function makeAppTable(name: string, publisher: string, appName: string, version: string): ALTable {
+  return {
+    id: 1, name, filePath: '', declarationLine: 1, fields: [],
+    isExternal: true,
+    appPublisher: publisher, appName, appVersion: version,
+    appFilePath: `/packages/${publisher}_${appName}_${version}.app`
+  };
 }
 
 function makeRel(sourceTable: string, sourceField: string, targetTable: string): ALRelation {
@@ -342,5 +351,154 @@ describe('TableGraph.getRelatedEntries', () => {
         }
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getSourceSubgraph – folderFilter
+// ---------------------------------------------------------------------------
+describe('TableGraph.getSourceSubgraph – folderFilter', () => {
+  function buildMultiFolderGraph(): TableGraph {
+    const tables = [
+      makeTable('TableA', false, undefined, 'ProjectA'),
+      makeTable('TableB', false, undefined, 'ProjectA'),
+      makeTable('TableC', false, undefined, 'ProjectB'),
+      makeTable('ExtItem', true, 'Microsoft.Inventory.Item'),
+    ];
+    const relations = [
+      makeRel('TableA', 'BRef', 'TableB'),
+      makeRel('TableC', 'ItemRef', 'ExtItem'),
+    ];
+    return new TableGraph(tables, relations);
+  }
+
+  it('without filter returns all source tables', () => {
+    const g = buildMultiFolderGraph();
+    const sub = g.getSourceSubgraph(1);
+    const names = sub.tables.map(t => t.name);
+    assert.ok(names.includes('TableA'));
+    assert.ok(names.includes('TableB'));
+    assert.ok(names.includes('TableC'));
+  });
+
+  it('with folderFilter limits seed tables to that folder only', () => {
+    const g = buildMultiFolderGraph();
+    const sub = g.getSourceSubgraph(1, 'ProjectA');
+    const names = sub.tables.map(t => t.name);
+    assert.ok(names.includes('TableA'), 'TableA is in ProjectA');
+    assert.ok(names.includes('TableB'), 'TableB is in ProjectA');
+    assert.ok(!names.includes('TableC'), 'TableC is in ProjectB, should be excluded');
+  });
+
+  it('still includes reachable external tables when folder filtered', () => {
+    const g = buildMultiFolderGraph();
+    const sub = g.getSourceSubgraph(1, 'ProjectB');
+    const names = sub.tables.map(t => t.name);
+    assert.ok(names.includes('TableC'));
+    assert.ok(names.includes('ExtItem'), 'ExtItem is 1 hop from TableC');
+  });
+
+  it('returns empty subgraph for unknown folder', () => {
+    const g = buildMultiFolderGraph();
+    const sub = g.getSourceSubgraph(1, 'DoesNotExist');
+    assert.equal(sub.tables.length, 0);
+    assert.equal(sub.relations.length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getSourceFolders
+// ---------------------------------------------------------------------------
+describe('TableGraph.getSourceFolders', () => {
+  it('returns distinct sorted folder names from source tables', () => {
+    const tables = [
+      makeTable('A', false, undefined, 'ZProject'),
+      makeTable('B', false, undefined, 'AProject'),
+      makeTable('C', false, undefined, 'AProject'),
+      makeTable('Ext', true),                    // external: no folder
+    ];
+    const g = new TableGraph(tables, []);
+    assert.deepEqual(g.getSourceFolders(), ['AProject', 'ZProject']);
+  });
+
+  it('returns empty array when no source tables have a sourceFolder', () => {
+    const g = new TableGraph([makeTable('A'), makeTable('B', true)], []);
+    assert.deepEqual(g.getSourceFolders(), []);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getAppPackages
+// ---------------------------------------------------------------------------
+describe('TableGraph.getAppPackages', () => {
+  it('returns distinct sorted app package keys', () => {
+    const tables = [
+      makeAppTable('Table1', 'Microsoft', 'Base Application', '25.0.0.0'),
+      makeAppTable('Table2', 'Microsoft', 'Base Application', '25.0.0.0'),
+      makeAppTable('Table3', 'Plataan BV', 'Core Library', '2.0.0.0'),
+      makeTable('SourceTable', false),
+    ];
+    const g = new TableGraph(tables, []);
+    const pkgs = g.getAppPackages();
+    assert.deepEqual(pkgs, [
+      'Microsoft / Base Application 25.0.0.0',
+      'Plataan BV / Core Library 2.0.0.0',
+    ]);
+  });
+
+  it('falls back to filename when app identity fields are missing', () => {
+    const table: ALTable = {
+      id: 1, name: 'X', filePath: '', declarationLine: 1, fields: [],
+      isExternal: true, appFilePath: '/pkgs/Unknown_App_1.0.0.0.app'
+    };
+    const g = new TableGraph([table], []);
+    const pkgs = g.getAppPackages();
+    assert.deepEqual(pkgs, ['Unknown_App_1.0.0.0.app']);
+  });
+
+  it('returns empty array when there are no external tables', () => {
+    const g = new TableGraph([makeTable('A')], []);
+    assert.deepEqual(g.getAppPackages(), []);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getSubgraphForAppPackage
+// ---------------------------------------------------------------------------
+describe('TableGraph.getSubgraphForAppPackage', () => {
+  function buildAppGraph(): TableGraph {
+    const tables = [
+      makeTable('SourceTable', false, undefined, 'MyProject'),
+      makeAppTable('BaseTable', 'Microsoft', 'Base Application', '25.0.0.0'),
+      makeAppTable('OtherTable', 'Microsoft', 'Base Application', '25.0.0.0'),
+      makeAppTable('SystemTable', 'Microsoft', 'System Application', '25.0.0.0'),
+    ];
+    const relations = [
+      makeRel('SourceTable', 'BaseRef', 'BaseTable'),
+    ];
+    return new TableGraph(tables, relations);
+  }
+
+  it('seeds from tables in the specified app package', () => {
+    const g = buildAppGraph();
+    const sub = g.getSubgraphForAppPackage('Microsoft / Base Application 25.0.0.0', 0);
+    const names = sub.tables.map(t => t.name);
+    assert.ok(names.includes('BaseTable'));
+    assert.ok(names.includes('OtherTable'));
+    assert.ok(!names.includes('SystemTable'), 'SystemTable is in a different package');
+  });
+
+  it('expands to neighbours within the depth', () => {
+    const g = buildAppGraph();
+    const sub = g.getSubgraphForAppPackage('Microsoft / Base Application 25.0.0.0', 1);
+    const names = sub.tables.map(t => t.name);
+    assert.ok(names.includes('SourceTable'), 'SourceTable is 1 hop from BaseTable');
+  });
+
+  it('returns empty subgraph for unknown app package key', () => {
+    const g = buildAppGraph();
+    const sub = g.getSubgraphForAppPackage('Unknown / App 1.0.0.0', 1);
+    assert.equal(sub.tables.length, 0);
+    assert.equal(sub.relations.length, 0);
   });
 });

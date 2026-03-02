@@ -136,9 +136,14 @@ export class TableGraph {
    * Returns the union of depth-bounded subgraphs rooted at every source
    * (non-external) table.  This is the default view — the analyst's own
    * tables plus the external tables they directly reference.
+   * Pass `folderFilter` to restrict the seed set to a single workspace folder.
    */
-  getSourceSubgraph(depth: number): SubGraph {
-    const sourceTables = Array.from(this.tableMap.values()).filter(t => !t.isExternal);
+  getSourceSubgraph(depth: number, folderFilter?: string): SubGraph {
+    const sourceTables = Array.from(this.tableMap.values()).filter(t => {
+      if (t.isExternal) { return false; }
+      if (folderFilter && t.sourceFolder !== folderFilter) { return false; }
+      return true;
+    });
     const visitedNames = new Set<string>();
 
     for (const src of sourceTables) {
@@ -157,6 +162,86 @@ export class TableGraph {
         for (const rel of this._byTarget.get(name) ?? []) {
           const s = rel.sourceTable.toLowerCase();
           if (!visitedNames.has(s)) { queue.push({ name: s, remaining: remaining - 1 }); }
+        }
+      }
+    }
+
+    const tables = Array.from(visitedNames)
+      .map(n => this.tableMap.get(n))
+      .filter((t): t is ALTable => t !== undefined);
+
+    const relations = this.relations.filter(
+      r =>
+        visitedNames.has(r.sourceTable.toLowerCase()) &&
+        visitedNames.has(r.targetTable.toLowerCase())
+    );
+
+    return { tables, relations };
+  }
+
+  /**
+   * Returns distinct workspace folder names from all source tables, sorted.
+   * Used to populate the "Project" dropdown.
+   */
+  getSourceFolders(): string[] {
+    const seen = new Set<string>();
+    for (const t of this.tableMap.values()) {
+      if (!t.isExternal && t.sourceFolder) { seen.add(t.sourceFolder); }
+    }
+    return Array.from(seen).sort();
+  }
+
+  /**
+   * Returns a human-readable key for an external table's app package.
+   * Format: "Publisher / Name Version"  (or filename fallback).
+   */
+  static appPackageKey(t: { appPublisher?: string; appName?: string; appVersion?: string; appFilePath?: string }): string {
+    if (t.appPublisher && t.appName) {
+      return `${t.appPublisher} / ${t.appName}${t.appVersion ? ' ' + t.appVersion : ''}`;
+    }
+    // Fallback: use the bare filename of the .app (strips path, keeps meaningful name)
+    if (t.appFilePath) {
+      return t.appFilePath.split(/[\\/]/).pop() ?? t.appFilePath;
+    }
+    return '(unknown app)';
+  }
+
+  /**
+   * Returns distinct app package keys ("Publisher / Name Version") from all
+   * external tables, sorted alphabetically.
+   */
+  getAppPackages(): string[] {
+    const seen = new Set<string>();
+    for (const t of this.tableMap.values()) {
+      if (t.isExternal) { seen.add(TableGraph.appPackageKey(t)); }
+    }
+    return Array.from(seen).sort();
+  }
+
+  /**
+   * Returns a subgraph containing all external tables whose app package key
+   * matches `appPackageKey`, plus neighbours reachable within `depth` hops.
+   */
+  getSubgraphForAppPackage(appPackageKey: string, depth: number): SubGraph {
+    const visitedNames = new Set<string>();
+    for (const t of this.tableMap.values()) {
+      if (t.isExternal && TableGraph.appPackageKey(t) === appPackageKey) {
+        const queue: Array<{ name: string; remaining: number }> = [
+          { name: t.name.toLowerCase(), remaining: depth }
+        ];
+        while (queue.length > 0) {
+          const { name, remaining } = queue.shift()!;
+          if (visitedNames.has(name)) { continue; }
+          visitedNames.add(name);
+          if (remaining <= 0) { continue; }
+          for (const rel of this._bySource.get(name) ?? []) {
+            const tgt = rel.targetTable.toLowerCase();
+            if (!visitedNames.has(tgt)) { queue.push({ name: tgt, remaining: remaining - 1 }); }
+          }
+          for (const rel of this._byTarget.get(name) ?? []) {
+            const s = rel.sourceTable.toLowerCase();
+            if (!visitedNames.has(s)) { queue.push({ name: s, remaining: remaining - 1 }); }
+          }
         }
       }
     }

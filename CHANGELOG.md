@@ -2,6 +2,20 @@
 
 All notable changes to AL Table Visualizer will be documented here.
 
+## [0.1.6] — 2026-03-02
+
+### Added
+- **Project filter dropdown** — new _Project_ dropdown in the diagram toolbar restricts the diagram to tables from a single workspace folder; useful when multiple AL projects share the same workspace. External app-package tables are still loaded and shown as neighbours when following relations.
+- **App Package filter dropdown** — new _App Package_ dropdown lets you browse all tables from a specific `.app` symbol package (e.g. _Microsoft / Base Application 25.0.0.0_) and see which source tables reference them.
+- **App identity on external tables** — publisher, name, version, and GUID are now read from `app.json` inside each `.app` ZIP and stored on every external table; the App Package dropdown is populated from this structured identity rather than raw file paths.
+- **Content-hash app package cache** — the disk cache for parsed `.app` packages is now keyed by SHA-256 of the file content rather than path + mtime + size. Identical packages copied across multiple `.alpackages/` folders share a single cache entry.
+- **Duplicate `.app` deduplication** — when multiple workspace folders each contain the same `.app` file (e.g. shared `Microsoft_Base_Application.app` in every `.alpackages/` folder), the scanner detects identical content and parses each unique file only once per scan run.
+- **Source-table-only QuickPick** — the _Find Related Tables_ QuickPick now lists source (`.al`) tables only, filtered to the active Project selection when set, keeping the list short and focused.
+
+### Changed
+- `Reset` button clears the Project and App Package dropdowns in addition to the Namespace dropdown.
+- Changing any one filter dropdown (Project / Namespace / App Package) automatically clears the other two to avoid conflicting filter state.
+
 ## [0.1.5] — 2026-02-28
 
 ### Added

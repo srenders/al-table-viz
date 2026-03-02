@@ -2,10 +2,19 @@ import JSZip from 'jszip';
 import { ALField, ALRelation, ALTable } from '../model/types';
 import { parseALFile } from './alFileParser';
 
+export interface AppPackageIdentity {
+  publisher: string;
+  name: string;
+  version: string;
+  id: string;
+}
+
 export interface AppPackageResult {
   tables: ALTable[];
   relations: ALRelation[];
   log: string[];
+  /** Identity read from app.json inside the .app ZIP */
+  appInfo?: AppPackageIdentity;
 }
 
 /**
@@ -28,6 +37,26 @@ export async function readAppPackage(
   // List all files in the package for diagnostics
   const allFiles = Object.keys(zip.files);
   log.push(`ZIP contains ${allFiles.length} entries: ${allFiles.slice(0, 20).join(', ')}${allFiles.length > 20 ? '...' : ''}`);
+
+  // ── Read app.json for package identity (publisher / name / version / id) ────
+  let appInfo: AppPackageIdentity | undefined;
+  const appJsonFile = zip.file('app.json') ?? zip.file(/(?:^|\/)app\.json$/i)[0];
+  if (appJsonFile) {
+    try {
+      const appJsonText = await appJsonFile.async('string');
+      const appJsonBom = appJsonText.charCodeAt(0) === 0xFEFF ? appJsonText.slice(1) : appJsonText;
+      const appMeta = JSON.parse(appJsonBom) as Record<string, unknown>;
+      appInfo = {
+        publisher: String(appMeta['publisher'] ?? appMeta['Publisher'] ?? '').trim(),
+        name:      String(appMeta['name']      ?? appMeta['Name']      ?? '').trim(),
+        version:   String(appMeta['version']   ?? appMeta['Version']   ?? '').trim(),
+        id:        String(appMeta['id']        ?? appMeta['Id']        ?? '').trim()
+      };
+      log.push(`app.json identity: ${appInfo.publisher} / ${appInfo.name} ${appInfo.version}`);
+    } catch (e) {
+      log.push(`Could not read app.json: ${e}`);
+    }
+  }
 
   let symbolJson: string | null = null;
   let foundIn = '';
@@ -88,7 +117,11 @@ export async function readAppPackage(
     pkFields: def.pkFields,
     isExternal: true,
     namespace: def.namespace || undefined,
-    appFilePath: appFilePath || undefined
+    appFilePath: appFilePath || undefined,
+    appPublisher: appInfo?.publisher || undefined,
+    appName:      appInfo?.name      || undefined,
+    appVersion:   appInfo?.version   || undefined,
+    appId:        appInfo?.id        || undefined
   }));
 
   // Build relations from TableRelation properties on fields
@@ -140,7 +173,7 @@ export async function readAppPackage(
     }
   }
 
-  return { tables, relations, log };
+  return { tables, relations, log, appInfo };
 }
 
 // ---------------------------------------------------------------------------

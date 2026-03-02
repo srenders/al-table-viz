@@ -42,6 +42,8 @@ const btnZoomIn       = document.getElementById('btnZoomIn')!;
 const btnZoomOut      = document.getElementById('btnZoomOut')!;
 const statusEl        = document.getElementById('status')!;
 const nsFilter        = document.getElementById('nsFilter') as HTMLSelectElement;
+const folderFilter    = document.getElementById('folderFilter') as HTMLSelectElement;
+const appFilter       = document.getElementById('appFilter') as HTMLSelectElement;
 const focusCrumbEl    = document.getElementById('focusCrumb')!;
 const crumbNameEl     = document.getElementById('crumbName')!;
 const btnClearFocus   = document.getElementById('btnClearFocus')!;
@@ -392,6 +394,44 @@ function populateNamespaces(namespaces: string[]): void {
 }
 
 // ---------------------------------------------------------------------------
+// Project (workspace folder) dropdown population
+// ---------------------------------------------------------------------------
+function populateFolders(folders: string[]): void {
+  const current = folderFilter.value;
+  while (folderFilter.options.length > 1) { folderFilter.remove(1); }
+  for (const f of folders) {
+    const opt = document.createElement('option');
+    opt.value = f;
+    opt.textContent = f;
+    folderFilter.appendChild(opt);
+  }
+  if (current && folders.includes(current)) {
+    folderFilter.value = current;
+  } else {
+    folderFilter.value = '';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// App Package dropdown population
+// ---------------------------------------------------------------------------
+function populateAppPackages(appPackages: string[]): void {
+  const current = appFilter.value;
+  while (appFilter.options.length > 1) { appFilter.remove(1); }
+  for (const pkg of appPackages) {
+    const opt = document.createElement('option');
+    opt.value = pkg;
+    opt.textContent = pkg;
+    appFilter.appendChild(opt);
+  }
+  if (current && appPackages.includes(current)) {
+    appFilter.value = current;
+  } else {
+    appFilter.value = '';
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Sidebar rendering
 // ---------------------------------------------------------------------------
 function renderSidebar(items: string[], active: string | null, filter = ''): void {
@@ -606,20 +646,46 @@ btnReset.addEventListener('click', () => {
   searchInput.value = '';
   sidebarSearchEl.value = '';
   nsFilter.value = '';
+  folderFilter.value = '';
+  appFilter.value = '';
   navHistory = []; navIndex = -1; updateNavButtons();
   postMsg({ type: 'filterByNamespace', namespace: '' });
 });
 
 btnClearFocus.addEventListener('click', () => {
   navHistory = []; navIndex = -1; updateNavButtons();
-  // Return to namespace list (or source view if no namespace active)
-  postMsg({ type: 'filterByNamespace', namespace: nsFilter.value });
+  // Return to app/folder/namespace filter (or source view if none active)
+  if (appFilter.value) {
+    postMsg({ type: 'filterByAppPackage', appPackage: appFilter.value });
+  } else if (folderFilter.value) {
+    postMsg({ type: 'filterBySourceFolder', folder: folderFilter.value });
+  } else {
+    postMsg({ type: 'filterByNamespace', namespace: nsFilter.value });
+  }
 });
 
 nsFilter.addEventListener('change', () => {
   searchInput.value = '';
   sidebarSearchEl.value = '';
+  folderFilter.value = '';
+  appFilter.value = '';
   postMsg({ type: 'filterByNamespace', namespace: nsFilter.value });
+});
+
+folderFilter.addEventListener('change', () => {
+  searchInput.value = '';
+  sidebarSearchEl.value = '';
+  nsFilter.value = '';
+  appFilter.value = '';
+  postMsg({ type: 'filterBySourceFolder', folder: folderFilter.value });
+});
+
+appFilter.addEventListener('change', () => {
+  searchInput.value = '';
+  sidebarSearchEl.value = '';
+  nsFilter.value = '';
+  folderFilter.value = '';
+  postMsg({ type: 'filterByAppPackage', appPackage: appFilter.value });
 });
 
 // Sidebar search — filters the list client-side, no round-trip needed
@@ -832,6 +898,8 @@ window.addEventListener('message', (event: MessageEvent<ExtensionMessage>) => {
       depthSlider.value = String(msg.payload.depth);
       depthVal.textContent = String(msg.payload.depth);
       populateNamespaces(msg.payload.namespaces ?? []);
+      populateFolders(msg.payload.sourceFolders ?? []);
+      populateAppPackages(msg.payload.appPackages ?? []);
       renderSidebar(msg.payload.sidebarItems ?? [], msg.payload.focusTable, sidebarSearchEl.value);
       // Sync direction button + local state from extension
       if (msg.payload.direction) {

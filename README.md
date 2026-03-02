@@ -22,7 +22,9 @@ A Visual Studio Code extension that parses Business Central AL source files and 
 - **ER diagram** — entity boxes with field names and data types, crow's foot notation on relation edges
 - **Focus mode** — double-click any table to expand its neighbourhood; the depth slider controls how many hops to show (max configurable to 10)
 - **Filter by name** — type in the search box to narrow the diagram to matching tables
-- **Namespace mode** — choose a namespace prefix from the dropdown to see all tables in that namespace and their neighbours
+- **Project filter** — choose a workspace folder from the _Project_ dropdown to restrict the default view to tables from that project only; useful when multiple AL apps share a workspace
+- **App Package filter** — choose an app package (e.g. _Microsoft / Base Application 25.0.0.0_) from the _App Package_ dropdown to browse its tables and see which source tables reference them
+- **Namespace mode** — choose a namespace prefix from the _Namespace_ dropdown to see all tables in that namespace and their neighbours
 - **Direction toggle** — switch between _Out_ (following FKs that _leave_ the focused table), _In_ (FKs that _arrive_ at it), or _Both_ directions
 - **Back / Forward navigation** — use the ‹/› buttons to move through the focus history within a session
 - **BFS-ranked node cap** — when the diagram exceeds the configured node limit the closest tables survive; a notice shows the total count and how to raise the limit
@@ -45,7 +47,8 @@ A Visual Studio Code extension that parses Business Central AL source files and 
 
 ### Source & packages
 - **Open source** — right-click a diagram node or click a name in the list to jump to its `.al` declaration; works for both local files and tables from `.app` packages
-- **Base-app coverage** — reads compiled `.app` symbol packages so relations to standard BC tables resolve correctly; results are disk-cached so subsequent scans are fast
+- **Base-app coverage** — reads compiled `.app` symbol packages so relations to standard BC tables resolve correctly; publisher/name/version identity is read from `app.json` inside the ZIP
+- **Deduplication across projects** — when multiple workspace folders each have the same `.app` in their `.alpackages/` folder, the scanner detects identical content (SHA-256) and parses it only once; shared packages are also stored as a single cache entry
 - **Incremental rescan** — when an `.al` file changes only that file is re-parsed; the rest of the graph is preserved
 - **Enum field labels** — fields declared as `Enum "Name"` show the enum type name rather than a numeric ID
 - **CASE/WHEN relations** — multi-branch `TableRelation` values using `CASE … OF … WHEN` are fully parsed
@@ -99,7 +102,7 @@ Press **F5** in VS Code to launch the Extension Development Host.
 | `src/model/tableGraph.ts` | In-memory graph with BFS subgraph, adjacency indexes, filter helpers |
 | `src/parser/alFileParser.ts` | Regex-based `.al` file parser (tables, fields, TableRelation) |
 | `src/parser/appPackageReader.ts` | `.app` ZIP symbol package reader (JSZip) |
-| `src/parser/appPackageCache.ts` | Disk cache for parsed `.app` packages (SHA-256 keyed, persisted to global storage) |
+| `src/parser/appPackageCache.ts` | Disk cache for parsed `.app` packages (content SHA-256 keyed, path-independent, persisted to global storage) |
 | `src/scanner/workspaceScanner.ts` | Orchestrates scanning, incremental `.al` rescan, file watching |
 | `src/panel/diagramPanel.ts` | Singleton WebviewPanel — sends graph payload, handles messages |
 | `src/panel/relationListPanel.ts` | Related Tables side panel |

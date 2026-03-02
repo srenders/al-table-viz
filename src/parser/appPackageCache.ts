@@ -13,15 +13,24 @@ import type { AppPackageResult } from './appPackageReader';
 export class AppPackageCache {
   constructor(private readonly cacheDir: string) {}
 
-  private _key(filePath: string, mtime: number, size: number): string {
-    return crypto
-      .createHash('sha256')
-      .update(`${filePath}:${mtime}:${size}`)
-      .digest('hex');
+  /**
+   * Cache key is SHA-256 of the raw file content bytes.
+   * Path-independent: two copies of the same .app at different paths share one entry.
+   */
+  private _key(contentHash: string): string {
+    return contentHash;
   }
 
-  async get(filePath: string, mtime: number, size: number): Promise<AppPackageResult | null> {
-    const cachePath = path.join(this.cacheDir, `${this._key(filePath, mtime, size)}.json`);
+  /**
+   * Compute the SHA-256 hex digest of a Buffer — used by the scanner to derive
+   * the contentHash before calling get/set.
+   */
+  static hashBytes(bytes: Buffer): string {
+    return crypto.createHash('sha256').update(bytes).digest('hex');
+  }
+
+  async get(contentHash: string): Promise<AppPackageResult | null> {
+    const cachePath = path.join(this.cacheDir, `${this._key(contentHash)}.json`);
     try {
       const data = await fs.readFile(cachePath, 'utf8');
       return JSON.parse(data) as AppPackageResult;
@@ -30,10 +39,10 @@ export class AppPackageCache {
     }
   }
 
-  async set(filePath: string, mtime: number, size: number, result: AppPackageResult): Promise<void> {
+  async set(contentHash: string, result: AppPackageResult): Promise<void> {
     try {
       await fs.mkdir(this.cacheDir, { recursive: true });
-      const cachePath = path.join(this.cacheDir, `${this._key(filePath, mtime, size)}.json`);
+      const cachePath = path.join(this.cacheDir, `${this._key(contentHash)}.json`);
       await fs.writeFile(cachePath, JSON.stringify(result), 'utf8');
     } catch {
       // Cache write failure is non-fatal — next run will re-parse

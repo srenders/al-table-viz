@@ -85,6 +85,16 @@ export interface ALTable {
   appFilePath?: string;
   /** Namespace from SymbolReference (e.g. 'Microsoft.Finance.GeneralLedger') — external tables only */
   namespace?: string;
+  /** App package publisher, read from app.json inside the .app ZIP (external tables only) */
+  appPublisher?: string;
+  /** App package name, read from app.json inside the .app ZIP (external tables only) */
+  appName?: string;
+  /** App package version string, read from app.json inside the .app ZIP (external tables only) */
+  appVersion?: string;
+  /** App package GUID, read from app.json inside the .app ZIP (external tables only) */
+  appId?: string;
+  /** Workspace folder name this table's .al source file belongs to (source tables only) */
+  sourceFolder?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -106,6 +116,10 @@ export interface GraphPayload {
   totalTables?: number;
   /** Sorted list of distinct namespace prefixes (2 dot-segments) from all external tables */
   namespaces: string[];
+  /** Sorted list of distinct app package keys ("Publisher / Name Version") from all external tables */
+  appPackages: string[];
+  /** Sorted list of distinct workspace folder names from all source tables */
+  sourceFolders: string[];
   /** All table names in the active namespace for the sidebar list; empty = no sidebar */
   sidebarItems: string[];
   /** Resolved colour palette for the webview to use when rendering the diagram */
@@ -148,6 +162,8 @@ export type WebviewMessage =
   | { type: 'setDirection'; direction: 'out' | 'in' | 'both' }
   | { type: 'filterTables'; query: string }
   | { type: 'filterByNamespace'; namespace: string }
+  | { type: 'filterByAppPackage'; appPackage: string }
+  | { type: 'filterBySourceFolder'; folder: string }
   | { type: 'findRelated'; tableName: string }
   | { type: 'syncRelated'; tableName: string }
   | { type: 'pickTable' }
